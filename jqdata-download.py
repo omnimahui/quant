@@ -5,6 +5,7 @@ from abc import ABCMeta, abstractmethod
 import sys
 import json
 from datetime import datetime
+from datetime import timedelta
 from time import time, sleep
 
 from pymongo import MongoClient, ASCENDING, DESCENDING
@@ -18,9 +19,8 @@ from vnpy.trader.object import BarData, TickData
 #                                                 TICK_DB_NAME,
 #                                                 ETF_DAILY_DB_NAME)
 import jqdatasdk as jq
-import multiprocessing
 from jqdatasdk import *
-from datetime import timedelta
+import multiprocessing
 from sklearn.linear_model import LinearRegression
 import math
 import argparse
@@ -32,30 +32,13 @@ import dask
 import functools
 import time
 import _pickle as pickle
-from statsmodels.tsa.stattools import adfuller
-from hurst import compute_Hc
-from genhurst import genhurst
-import statsmodels.api as sm
-import statsmodels.tsa.stattools as ts
-import statsmodels.tsa.vector_ar.vecm as vm
+
+
+
+
 import math
-
-# 加载配置
-config = open("config.json")
-setting = json.load(config)
-
-dask.config.set(scheduler="multiprocessing")
-
-
-FIELDS = ["open", "high", "low", "close", "volume"]
-
-STARTDATE = "2019-06-03"
-ENDDATA = "2019-06-03"
-DATE_FORMAT = "%Y-%m-%d"
-JQDATA_STARTDATE = "2005-01-01"
-JQDATA_ENDDATE = datetime.now().strftime(DATE_FORMAT)
-DASK_NPARTITIONS = 50
-MONGODB_HOST = "127.0.0.1"
+import os
+from common import *
 
 
 def dot_to_underscore(string: str):
@@ -64,7 +47,6 @@ def dot_to_underscore(string: str):
 
 def underscore_to_dot(string: str):
     return string.replace("_", ".")
-
 
 def timer(func):
     @functools.wraps(func)
@@ -79,620 +61,22 @@ def timer(func):
     return wrapper_timer
 
 
-class JQData(object):
-    @staticmethod
-    def connect():
-        if jq.is_auth() == False:
-            setting = json.load(open("config.json"))
-            jq.auth(setting["jqUsername"], setting["jqPassword"])
 
-    @staticmethod
-    def disconnect():
-        jq.logout()
 
 
-class Security(object):
-    def __init__(self):
-        self.db_name = "securities"
-        self.cl_name = "securities"
-        self.db_conn = MongoClient(host=MONGODB_HOST)
-        self.db = self.db_conn[self.db_name]
-        self.cl = self.db[self.cl_name]
-        self.securities_df = self.load()
-        # self.securities_df["index" == index]
 
-    def update(self):
-        self.cl.drop()
-        securities_df = jq.get_all_securities(types=["stock", "fund", "index", "etf"])
-        securities_df.reset_index(level=0, inplace=True)
-        self.cl.insert_many(securities_df.to_dict("records"))
-        return 1
 
-    def load(self, securityType: str = ""):
-        find_string = {"type": securityType} if securityType != "" else {}
-        return pd.DataFrame(list(self.cl.find(find_string)))
 
-    def getSecurityDate(self, index):
-        row = self.securities_df[self.securities_df["index"] == index]
-        if row.start_date.values[0] > np.datetime64(JQDATA_STARTDATE):
-            start_date = np.datetime_as_string(row.start_date, "D").item(0)
-        else:
-            start_date = JQDATA_STARTDATE
 
-        if row.end_date.values[0] < np.datetime64(JQDATA_ENDDATE):
-            end_date = np.datetime_as_string(row.end_date, "D").item(0)
-        else:
-            end_date = JQDATA_ENDDATE
-        start_date = datetime.strptime(start_date, DATE_FORMAT)
-        end_date = datetime.strptime(end_date, DATE_FORMAT)
-        return start_date, end_date
 
 
-class SecurityBase(object):
-    __metaclass__ = ABCMeta
 
-    def __init__(self, db_name):
-        self.security = Security()
-        self.db_conn = MongoClient(host=MONGODB_HOST)
-        self.db = self.db_conn[db_name]
-        self.df_dict = {}
-        self.securityType = ""
-        self.index_column = ""
-        self.fieldsFromDb = ["index"]
 
-    def loadFieldsFromDB(self, fields=["index"]):
-        self.df_dict = dict.fromkeys(self.db.list_collection_names(), pd.DataFrame())
-        filter = {}
-        filter["_id"] = 0
-        for field in fields:
-            filter[field] = 1
-        for security in self.df_dict.keys():
-            self.df_dict[security] = pd.DataFrame(
-                list(self.db[security].find({}, filter).sort("index", 1))
-            )
 
-    @abstractmethod
-    def query(self, index, start_date, end_date):
-        pass
 
-    def set_index_column(self, df, column: str = ""):
-        df["index"] = df.index if column == "" else df[column]
 
-    def updateOne(self, index: str):
-        start_date, end_date = self.security.getSecurityDate(index)
 
-        # Get last date of the stock from db['close']
-        try:
-            last_date = self.df_dict[index]["index"].iloc[-1]
-            # Timestamp to datetime
-            start_date = (last_date + timedelta(days=1)).to_pydatetime()
-        except Exception:
-            ...
 
-        if start_date <= end_date:
-            df = self.query(index, start_date, end_date)
-            if not df.empty:
-                self.set_index_column(df, self.index_column)
-                self.db[index].insert_many(df.to_dict("records"))
-                print(
-                    "{0} {1} to {2} {3} downloaded".format(
-                        index,
-                        start_date.strftime(DATE_FORMAT),
-                        end_date.strftime(DATE_FORMAT),
-                        self.__class__.__name__,
-                    )
-                )
-
-    def updateAll(self):
-        security_df = self.security.load(securityType=self.securityType)
-        self.loadFieldsFromDB(fields=self.fieldsFromDb)
-        security_df["index"].apply(self.updateOne)
-
-
-class DailyPrice(SecurityBase):
-    def __init__(self,db_name="DailyPrice"):
-        super(DailyPrice, self).__init__(db_name)
-        self.price_pickle = "dailyprice.pkl"
-
-    def query(self, index, start_date, end_date):
-        df = jq.get_price(
-            index, start_date, end_date, skip_paused=True, fill_paused=False
-        )
-        return df
-
-    def loadAll(self):
-        try:
-            fp = open(self.price_pickle, "rb")
-            self.df_dict = pickle.load(fp)
-        except Exception:
-            self.df_dict = dict.fromkeys(
-                self.db.list_collection_names(), pd.DataFrame()
-            )
-            for security in self.df_dict.keys():
-                self.df_dict[security] = pd.DataFrame(
-                    list(self.db[security].find({}, {"_id": 0}).sort("index", 1))
-                )
-                self.df_dict[security].index = self.df_dict[security]["index"]
-            fp = open(self.price_pickle, "wb")
-            pickle.dump(self.df_dict, fp)
-
-        return self.df_dict
-
-
-class WeeklyPrice(DailyPrice):
-    def __init__(self, db_name="WeeklyPrice"):
-        super(WeeklyPrice, self).__init__(db_name)
-        self.price_pickle = "weeklyprice.pkl"
-        self.dailyprice_df = DailyPrice().loadAll()
-
-    def query(self, index, start_date, end_date):
-        if self.dailyprice_df.get(index) is None:
-            return pd.DataFrame()
-        stock_weekly_df = (
-            self.dailyprice_df[index][start_date:end_date]
-            .resample("W")
-            .agg(
-                {
-                    "close": take_last,
-                    "high": "max",
-                    "low": "min",
-                    "money": "sum",
-                    "open": take_first,
-                    "volume": "sum",
-                }
-            )
-        )
-        stock_weekly_df.index = stock_weekly_df.index + pd.DateOffset(days=-2)
-        stock_weekly_df = stock_weekly_df.dropna()
-        stock_weekly_df["index"] = stock_weekly_df.index
-        return stock_weekly_df
-
-    def updateOne(self, index: str):
-        start_date, end_date = self.security.getSecurityDate(index)
-
-        if start_date <= end_date:
-            # Load all daily price to calculate weekly price
-            df = self.query(index, start_date, end_date)
-            if not df.empty:
-                # Due to the weekly price on weekday could be incorrect,
-                # We will update all weekly price anyway                
-                self.db[index].drop()
-                self.db[index].insert_many(df.to_dict("records"))
-                print(
-                    "{0} {1} to {2} {3} downloaded".format(
-                        index,
-                        start_date.strftime(DATE_FORMAT),
-                        end_date.strftime(DATE_FORMAT),
-                        self.__class__.__name__,
-                    )
-                )
-
-
-class MonthlyPrice(WeeklyPrice):
-    def __init__(self, db_name="MonthlyPrice"):
-        super(MonthlyPrice, self).__init__(db_name)
-        self.price_pickle = "monthlyprice.pkl"
-        self.dailyprice_df = DailyPrice().loadAll()
-
-    def query(self, index, start_date, end_date):
-        if self.dailyprice_df.get(index) is None:
-            return pd.DataFrame()
-        stock_weekly_df = (
-            self.dailyprice_df[index][start_date:end_date]
-            .resample("M")
-            .agg(
-                {
-                    "close": take_last,
-                    "high": "max",
-                    "low": "min",
-                    "money": "sum",
-                    "open": take_first,
-                    "volume": "sum",
-                }
-            )
-        )
-        stock_weekly_df.index = stock_weekly_df.index + pd.DateOffset(days=-1)
-        stock_weekly_df = stock_weekly_df.dropna()
-        stock_weekly_df["index"] = stock_weekly_df.index
-        return stock_weekly_df
-
-
-class IsST(SecurityBase):
-    def __init__(self):
-        super(IsST, self).__init__("IsST")
-        self.securityType = "stock"
-
-    def set_index_column(self, df, column: str = ""):
-        df.columns = ["isSt"]
-        df["index"] = df.index if column == "" else df[column]
-
-    def query(self, index, start_date, end_date):
-        df = jq.get_extras("is_st", [index], start_date, end_date, df=True)
-        return df
-
-
-class MTSS(SecurityBase):
-    def __init__(self):
-        super(MTSS, self).__init__("MTSS")
-        self.securityType = "stock"
-        self.index_column = "date"
-
-    def query(self, index, start_date, end_date):
-        df = get_mtss(index, start_date, end_date)
-        return df
-
-
-class MoneyFlow(SecurityBase):
-    def __init__(self):
-        super(MoneyFlow, self).__init__("MoneyFlow")
-        self.securityType = "stock"
-        self.index_column = "date"
-
-    def query(self, index, start_date, end_date):
-        df = get_money_flow(index, start_date, end_date)
-        return df
-
-
-class FundamentalQuarter(SecurityBase):
-    def __init__(self, db_name="FundamentalQuarter"):
-        super(FundamentalQuarter, self).__init__(db_name)
-        self.securityType = "stock"
-        self.index_column = "day"
-        self.fieldsFromDb = ["index", "statDate"]
-        self.start_from = "2004-09-30"
-
-    def prev_statdate(self, statdate):
-        if statdate.month < 4:
-            return datetime(statdate.year - 1, 12, 31)
-        elif statdate.month < 7:
-            return datetime(statdate.year, 3, 31)
-        elif statdate.month < 10:
-            return datetime(statdate.year, 6, 30)
-        return datetime(statdate.year, 9, 30)
-
-    def query(self, index, start_date, end_date):
-        # Get the latest fundamental on end_date
-        q = query(indicator).filter(indicator.code == index,)
-        df = get_fundamentals(q, date=end_date)
-        if not df.empty:
-            df = df.drop(columns=["id"])
-            # Change str to datetime
-            df.index = df["day"]
-        return df
-
-    def updateOne(self, index):
-        start_date, end_date = self.security.getSecurityDate(index)
-        last_statdate = datetime.strptime(self.start_from, DATE_FORMAT)
-
-        # Get last date of the stock from db['close']
-        try:
-            last_date = self.df_dict[index]["index"].iloc[-1]
-            last_statdate = (
-                self.df_dict[index]
-                .loc[self.df_dict[index]["index"] == last_date]["statDate"]
-                .values[0]
-            )
-            last_statdate = datetime.strptime(last_statdate, DATE_FORMAT)
-            # Timestamp to datetime
-            start_date = (last_date + timedelta(days=1)).to_pydatetime()
-        except Exception:
-            ...
-
-        orig_start_date = start_date
-        if start_date <= end_date:
-            # Get end_date (today) fundamental
-            df = self.query(index, start_date, end_date)
-            if not df.empty:
-                latest_pubdate = datetime.strptime(df["pubDate"][0], DATE_FORMAT)
-                statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                if statdate > last_statdate:
-                    start_date = latest_pubdate
-
-                accumulative_df = pd.DataFrame()
-                while statdate >= last_statdate:
-                    delta = end_date - start_date
-                    delta_days = delta.days + 1
-                    newdf = pd.DataFrame(np.repeat(df.values, delta_days, axis=0))
-                    newdf.columns = df.columns
-                    ts = pd.date_range(end_date, periods=delta_days, freq="-1D")
-                    newdf["day"] = ts
-                    self.set_index_column(newdf, self.index_column)
-                    accumulative_df = accumulative_df.append(newdf)
-                    if statdate == last_statdate:
-                        self.db[index].insert_many(accumulative_df.to_dict("records"))
-                        break
-
-                    statdate = self.prev_statdate(statdate)
-                    end_date = start_date - timedelta(days=1)
-                    df = self.query(index, start_date, end_date)
-                    if not df.empty:
-                        latest_pubdate = datetime.strptime(
-                            df["pubDate"][0], DATE_FORMAT
-                        )
-                        statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                        if statdate > last_statdate:
-                            start_date = latest_pubdate
-                        else:
-                            start_date = orig_start_date
-
-
-class FundamentalYear(FundamentalQuarter):
-    def __init__(self):
-        super(FundamentalYear, self).__init__(db_name="FundamentalYear")
-        self.securityType = "stock"
-        self.index_column = "day"
-        self.fieldsFromDb = ["index", "statDate"]
-        self.start_from = "2004-12-31"
-
-    def prev_year_statdate(self, statdate):
-        return datetime(statdate.year - 1, 12, 31)
-
-    def query(self, index, start_date, end_date):
-        # Get the latest fundamental on end_date
-        q = query(indicator).filter(indicator.code == index,)
-        while 1:
-            df = get_fundamentals(q, date=end_date)
-            if df.empty:
-                break
-            df = df.drop(columns=["id"])
-            # Change str to datetime
-            df.index = df["day"]
-            pubDate = datetime.strptime(df["pubDate"][0], DATE_FORMAT)
-            statDate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-            if statDate.month != 12:
-                # Prev quarter report
-                end_date = pubDate - timedelta(days=1)
-            else:
-                break
-        return df
-
-    def updateOne(self, index):
-        start_date, end_date = self.security.getSecurityDate(index)
-        last_statdate = datetime.strptime(self.start_from, DATE_FORMAT)
-
-        # Get last date of the stock from db['close']
-        try:
-            last_date = self.df_dict[index]["index"].iloc[-1]
-            last_statdate = (
-                self.df_dict[index]
-                .loc[self.df_dict[index]["index"] == last_date]["statDate"]
-                .values[0]
-            )
-            last_statdate = datetime.strptime(last_statdate, DATE_FORMAT)
-            # Timestamp to datetime
-            start_date = (last_date + timedelta(days=1)).to_pydatetime()
-        except Exception:
-            ...
-
-        orig_start_date = start_date
-        if start_date <= end_date:
-            # Get end_date (today) fundamental
-            df = self.query(index, start_date, end_date)
-            if not df.empty:
-                latest_pubdate = datetime.strptime(df["pubDate"][0], DATE_FORMAT)
-                statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                if statdate > last_statdate:
-                    start_date = latest_pubdate
-
-                accumulative_df = pd.DataFrame()
-                while statdate >= last_statdate:
-                    delta = end_date - start_date
-                    delta_days = delta.days + 1
-                    newdf = pd.DataFrame(np.repeat(df.values, delta_days, axis=0))
-                    newdf.columns = df.columns
-                    ts = pd.date_range(end_date, periods=delta_days, freq="-1D")
-                    newdf["day"] = ts
-                    self.set_index_column(newdf, self.index_column)
-                    accumulative_df = accumulative_df.append(newdf)
-                    if statdate == last_statdate:
-                        self.db[index].insert_many(accumulative_df.to_dict("records"))
-                        break
-
-                    statdate = self.prev_statdate(statdate)
-                    end_date = start_date - timedelta(days=1)
-                    df = self.query(index, start_date, end_date)
-                    if not df.empty:
-                        latest_pubdate = datetime.strptime(
-                            df["pubDate"][0], DATE_FORMAT
-                        )
-                        statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                        if statdate > last_statdate:
-                            start_date = latest_pubdate
-                        else:
-                            start_date = orig_start_date
-                    else:
-                        self.db[index].insert_many(accumulative_df.to_dict("records"))
-                        break
-
-
-class algo(object):
-    def __init__(self):
-        self.start_date = "2020-03-23"
-        self.end_date = "2020-07-08"
-        self.df_dict = DailyPrice().loadAll()
-
-    def adftest(self):
-        for security in self.df_dict.keys():
-            df = self.df_dict[security].loc[
-                (self.df_dict[security].index > self.start_date)
-                & (self.df_dict[security].index <= self.end_date)
-            ]
-            if df.empty or df["close"].count() < 8:
-                continue
-            X = df["close"].dropna().values
-            result = adfuller(X, maxlag=1, regression="c", autolag=None)
-            if result[0] < result[4]["1%"]:
-                print("{0} {1} - {2}".format(security, self.start_date, self.end_date))
-                print("ADF Statistic: %f" % result[0])
-                print("p-value: %f" % result[1])
-                print("Critical Values:")
-                for key, value in result[4].items():
-                    print("\t%s: %.3f" % (key, value))
-                self.halflife(X)
-
-    def cadftest(self):
-        # for security_x in self.df_dict.keys():
-        security_x = "000001.XSHG"
-        df_x = self.df_dict[security_x].loc[
-            (self.df_dict[security_x].index > self.start_date)
-            & (self.df_dict[security_x].index <= self.end_date)
-        ]
-        # if df_x.empty or df_x["close"].count() < 8:
-        #    continue
-
-        for security_y in self.df_dict.keys():
-            if security_x == security_y:
-                continue
-            df_y = self.df_dict[security_y].loc[
-                (self.df_dict[security_y].index > self.start_date)
-                & (self.df_dict[security_y].index <= self.end_date)
-            ]
-            df_y = df_y[df_y[["close"]] != 0]
-            if df_y.empty or df_x["close"].count() != df_y["close"].count():
-                continue
-
-            coint_t1, pvalue1, crit_value1 = ts.coint(df_x["close"], df_y["close"])
-            coint_t2, pvalue2, crit_value2 = ts.coint(df_y["close"], df_x["close"])
-            t = 0
-            crit_value = []
-            if coint_t1 < coint_t2:
-                t = coint_t1
-                crit_value = crit_value1
-            else:
-                t = coint_t2
-                crit_value = crit_value2
-            if t > crit_value[2]:
-                print(
-                    "{0} and {1} {2} - {3}".format(
-                        security_x, security_y, self.start_date, self.end_date
-                    )
-                )
-                print("CADF Statistic: %f" % t)
-                print("Critical Values: %f" % crit_value[2])
-
-    def hurst(self):
-        for security in self.df_dict.keys():
-            #            if security != "603939.XSHG":
-            #                continue
-            df = self.df_dict[security].loc[
-                (self.df_dict[security].index > self.start_date)
-                & (self.df_dict[security].index <= self.end_date)
-            ]
-            if df.empty or df["close"].count() < 100:
-                continue
-            series = df["close"].dropna()
-            X = series[series > 0].tail(100).values
-            if np.var(X) == 0:
-                continue
-            H, c, data = compute_Hc(X, kind="price", simplified=True)
-            # H, pVal=genhurst(np.log(X))
-            if H < 0.5:
-                print(
-                    "{0} {1} - {2} Hurst: {3} ".format(
-                        security, self.start_date, self.end_date, H
-                    )
-                )
-                self.halflife(X)
-
-    def halflife(self, X):
-        # half life
-        X_lag = np.roll(X, 1)
-        X_lag[0] = 0
-        X_ret = X - X_lag
-        X_ret[0] = 0
-        X_lag2 = sm.add_constant(X_lag)
-        model = sm.OLS(X_ret, X_lag2)
-        res = model.fit()
-        halflife = -math.log(2) / res.params[1]
-        print("Halflife = {0}".format(halflife))
-        return halflife
-
-
-class indicators(object):
-    def __init__(self, class_name = "DailyPrice",db_name = "DailyIndicators"):
-        #Load price timeseries
-        self.df_dict = eval(class_name)().loadAll()
-        self.db_name = db_name
-        self.db_conn = MongoClient(host=MONGODB_HOST)
-        self.db = self.db_conn[self.db_name]        
-
-    def sma(self, index, window):
-        ts = self.df_dict[index].close
-        sma = ts.rolling(window=window, center=False).mean()
-        sma.name = "sma_" + str(window)
-        #sma = sma.reindex(ts.index)
-        return sma
-    
-    def tr(self, index):
-        df = pd.DataFrame()
-        df["1"] = (self.df_dict[index].high - self.df_dict[index].low).abs()
-        df["2"] = (self.df_dict[index].high - self.df_dict[index].close.shift(1)).abs()
-        df["3"] = (self.df_dict[index].low - self.df_dict[index].close.shift(1)).abs()
-        tr = df.max(axis=1)    
-        return tr
-
-    def atr(self, index, window):
-        tr = self.tr(index)
-        atr = tr.rolling(window=window, center=False).mean()
-        atr.name = "atr_" + str(window)
-        #atr=atr.reindex(self.df_dict[index].index)
-        return atr
-
-    def ewma(self, ts, window=9):
-        ewmaSeries = ts.ewm(span=window, adjust=False).mean()
-        return ewmaSeries
-    
-    def dif(self, index, fast=12, slow=26):
-        ts = self.df_dict[index].close
-        dif = self.ewma(ts, window=fast) - self.ewma(
-            ts, window=slow
-        )
-        dif.name = "dif"
-        return dif
-
-    def dea(self, dif, window=9):
-        dea = ewmaCal(dif, window=window)
-        dea.name = "dea"
-        return dea
-    
-    def macd(self, dif, dea):
-        macd = (dif - dea) * 2
-        macd.name = "macd"
-        return macd
-        
-    def update(self):
-        #For each index        
-        #Calculate all indicaters
-        for security in self.df_dict.keys():
-            try:               
-                sma_21 = self.sma(security, 21)
-                sma_55 = self.sma(security, 55)
-                sma_200 = self.sma(security, 200)
-                atr_20 = self.atr(security, 20)
-                atr_60 = self.atr(security, 60)
-                dif = self.dif(security)
-                dea = self.dea(dif)
-                macd = self.macd(dif, dea)
-                df = pd.DataFrame(index=self.df_dict[security].index)
-                for series in [
-                    sma_21,
-                    sma_55,
-                    sma_200,
-                    atr_20,
-                    atr_60,
-                    dif,
-                    dea,
-                    macd,
-                ]:            
-                    df = df.merge(series.to_frame(), left_index=True, right_index=True)
-    
-                df["index"] = self.df_dict[security].index
-                #Insert into DB
-                self.db[security].drop()
-                self.db[security].insert_many(df.to_dict("records"))
-
-            except Exception as ex:
-                print ("Got exception: {0} {1}".format(security, ex))
 
 def test_print(value):
     print(value)
@@ -1322,9 +706,31 @@ def take_last(array_like):
 def updateAll():
     Security().update()
     DailyPrice().updateAll()
+    WeeklyPrice().updateAll()
+    MonthlyPrice().updateAll()
     MoneyFlow().updateAll()
     IsST().updateAll()
     MTSS().updateAll()
+    Valuation().updateAll()
+    indicators().update()
+    indicators(
+                class_name="WeeklyPrice", db_name="WeeklyIndicators"
+            ).update()
+    indicators(
+                class_name="MonthlyPrice", db_name="MonthlyIndicators"
+            ).update()
+    
+def test():
+    q = (
+        query(finance.STK_XR_XD)
+        .filter(
+            finance.STK_XR_XD.a_xr_date >= "2020-01-01",
+            finance.STK_XR_XD.code == "601066.XSHG",
+        )
+        .limit(10)
+    )
+    df = finance.run_query(q)
+    print(df)
 
 
 if __name__ == "__main__":
@@ -1336,19 +742,29 @@ if __name__ == "__main__":
         "updatePriceD": DailyPrice().updateAll,
         "updatePriceW": WeeklyPrice().updateAll,
         "updatePriceM": MonthlyPrice().updateAll,
+        "updateIndustry": Industry().updateAll,
         "updateMoneyflow": MoneyFlow().updateAll,
         "updateSt": IsST().updateAll,
         "updateMtss": MTSS().updateAll,
         "updateFundQ": FundamentalQuarter().updateAll,
         "updateFundY": FundamentalYear().updateAll,
+        "updateIncomeQ": IncomeQuarter().updateAll,
+        "updateBalanceQ": BalanceQuarter().updateAll,
+        "updateValuation": Valuation().updateAll,
+        "updateSW1": SW1DailyPrice().updateAll,
         "loadPrice": DailyPrice().loadAll,
         "adftest": algo().adftest,
         "hurst": algo().hurst,
         "cadftest": algo().cadftest,
+        "percent": algo().percent,
+        "test": IncomeQuarter().loadAll,
         "updateIndicatorsD": indicators().update,
-        "updateIndicatorsW": indicators(class_name="WeeklyPrice",db_name = "WeeklyIndicators").update,
-        "updateIndicatorsM": indicators(class_name="MonthlyPrice",db_name = "MonthlyIndicators").update,
-        # "updateUSPrice": UsPrice().updateAll,
+        "updateIndicatorsW": indicators(
+            class_name="WeeklyPrice", db_name="WeeklyIndicators"
+        ).update,
+        "updateIndicatorsM": indicators(
+            class_name="MonthlyPrice", db_name="MonthlyIndicators"
+        ).update,
         "stockcal": stockCal,
         "indexcal": indexCal,
         "industries": get_industries,
