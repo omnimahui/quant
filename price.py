@@ -1,4 +1,5 @@
 # encoding: UTF-8
+from abc import ABCMeta, abstractmethod
 from datetime import datetime
 from datetime import timedelta
 from pymongo import MongoClient, ASCENDING, DESCENDING
@@ -8,6 +9,8 @@ import _pickle as pickle
 import jqdatasdk as jq
 from jqdatasdk import *
 from common import *
+from sqlalchemy import and_
+import os
 
 
 class Security(object):
@@ -24,6 +27,7 @@ class Security(object):
         securities_df = jq.get_all_securities(types=["stock", "fund", "index", "etf"])
         securities_df.reset_index(level=0, inplace=True)
         self.cl.insert_many(securities_df.to_dict("records"))
+        print("security list updated")
         return 1
 
     def load(self, securityType: str = ""):
@@ -58,6 +62,7 @@ class SecurityBase(object):
         self.index_column = ""
         self.fieldsFromDb = ["index"]
         self.pickle_file = self.db_name + ".pkl"
+        self.specify_date = False
         self.db_connect()
 
     def db_connect(self):
@@ -87,12 +92,16 @@ class SecurityBase(object):
         start_date, end_date = self.security.getSecurityDate(index)
 
         # Get last date of the stock from db['close']
-        try:
-            last_date = self.df_dict[index]["index"].iloc[-1]
-            # Timestamp to datetime
-            start_date = (last_date + timedelta(days=1)).to_pydatetime()
-        except Exception:
-            ...
+        if self.specify_date is True:
+            start_date = self.start_date
+            end_date = self.end_date
+        else:
+            try:
+                last_date = self.df_dict[index]["index"].iloc[-1]
+                # Timestamp to datetime
+                start_date = (last_date + timedelta(days=1)).to_pydatetime()
+            except Exception:
+                ...
 
         if start_date <= end_date:
             df = self.query(index, start_date, end_date)
@@ -140,48 +149,154 @@ class DailyPrice(SecurityBase):
         super(DailyPrice, self).__init__(db_name)
         # self.pickle_file = "dailyprice.pkl"
 
-    def updateOne(self, index):
-        try:
-            last_date = self.df_dict[index]["index"].iloc[-1].strftime(DATE_FORMAT)
-            # If there are bonus or split after last_date,
-            # need to re-download all price because of "pre" adjustment
-            q = (
-                query(finance.STK_XR_XD)
-                .filter(
-                    finance.STK_XR_XD.code == index,
-                    finance.STK_XR_XD.a_bonus_date >= last_date,
-                )
-                .limit(100)
-            )
-            df = finance.run_query(q)
-            if not df.empty:
-                print("{0} has bonus after {1}".format(index, last_date))
-                self.df_dict.pop(index, None)
-                self.db[index].drop()
-            else:
-                q = (
-                    query(finance.STK_XR_XD)
-                    .filter(
-                        finance.STK_XR_XD.code == index,
-                        finance.STK_XR_XD.a_bonus_date >= last_date,
-                    )
-                    .limit(100)
-                )
-                df = finance.run_query(q)
-                if not df.empty:
-                    print("{0} has split after {1}".format(index, last_date))
-                    self.df_dict.pop(index, None)
-                    self.db[index].drop()
+    #    def updateOne(self, index):
+    #        try:
+    #            last_date = self.df_dict[index]["index"].iloc[-1].strftime(DATE_FORMAT)
+    # If there are bonus or split after last_date,
+    # need to re-download all price because of "pre" adjustment
+    #            q = (
+    #                query(finance.STK_XR_XD)
+    #                .filter(
+    #                    finance.STK_XR_XD.code == index,
+    #                    finance.STK_XR_XD.a_bonus_date >= last_date,
+    #                )
+    #                .limit(100)
+    #            )
+    #            df = finance.run_query(q)
+    #            if not df.empty:
+    #                print("{0} has bonus after {1}".format(index, last_date))
+    #                self.df_dict.pop(index, None)
+    #                self.db[index].drop()
+    #            else:
+    #                q = (
+    #                    query(finance.STK_XR_XD)
+    #                    .filter(
+    #                        finance.STK_XR_XD.code == index,
+    #                        finance.STK_XR_XD.a_bonus_date >= last_date,
+    #                    )
+    #                    .limit(100)
+    #                )
+    #                df = finance.run_query(q)
+    #                if not df.empty:
+    #                    print("{0} has split after {1}".format(index, last_date))
+    #                    self.df_dict.pop(index, None)
+    #                    self.db[index].drop()
 
-        except Exception:
-            pass
-        super(DailyPrice, self).updateOne(index)
+    #        except Exception:
+    #            pass
+    #        super(DailyPrice, self).updateOne(index)
 
     def query(self, index, start_date, end_date):
         df = jq.get_price(
             index, start_date, end_date, skip_paused=True, fill_paused=False, fq="pre"
         )
         return df
+
+
+class SecurityAdj(SecurityBase):
+    def __init__(self, db_name="SecurityAdj"):
+        super(SecurityAdj, self).__init__(db_name)
+        self.dailyprice_db = self.db_conn["DailyPrice"]
+        self.df_dict = dict()
+
+    def updateOne(self, index):
+        try:
+            self.dailyprice_db[index].drop()
+        except Exception:
+            pass
+
+    def query(self, index, start_date, end_date):
+        q = query(finance.STK_XR_XD).filter(
+            and_(
+                finance.STK_XR_XD.a_xr_date > start_date,
+                finance.STK_XR_XD.a_xr_date <= end_date,
+            )
+        )
+        df = finance.run_query(q)
+        return df
+
+    def updateAll(self):
+        start_date = datetime.strptime("2010-01-01", DATE_FORMAT)
+        if hasattr(self, "pickle_file") and os.path.exists(self.pickle_file):
+            os.remove(self.pickle_file)
+
+        try:
+            # Get existing db for start_time
+            self.df_dict["xr"] = pd.DataFrame(
+                list(self.db["xr"].find({}, {"_id": 0}).sort("index", 1))
+            )
+            # Get max start_time
+            start_date = self.df_dict["xr"].a_xr_date.max()
+            start_date = datetime.strptime(start_date, DATE_FORMAT)
+        except Exception:
+            pass
+        end_date = start_date + timedelta(days=100)
+        if end_date > datetime.now():
+            end_date = datetime.now()
+        start_date = start_date.strftime(DATE_FORMAT)
+        end_date = end_date.strftime(DATE_FORMAT)
+        # Get new xr
+        index = "xr"
+        df = self.query(index, start_date, end_date)
+        if not df.empty:
+            df["code"].apply(self.updateOne)
+            df["report_date"] = df.report_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["board_plan_pub_date"] = df.board_plan_pub_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["shareholders_plan_pub_date"] = df.shareholders_plan_pub_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["implementation_pub_date"] = df.implementation_pub_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["a_registration_date"] = df.a_registration_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_registration_date"] = df.b_registration_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["a_xr_date"] = df.a_xr_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_xr_baseday"] = df.b_xr_baseday.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_final_trade_date"] = df.b_final_trade_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["a_bonus_date"] = df.a_bonus_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_bonus_date"] = df.b_bonus_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["dividend_arrival_date"] = df.dividend_arrival_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_dividend_arrival_date"] = df.b_dividend_arrival_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["a_increment_listing_date"] = df.a_increment_listing_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_increment_listing_date"] = df.b_increment_listing_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["a_transfer_arrival_date"] = df.a_transfer_arrival_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+            df["b_transfer_arrival_date"] = df.b_transfer_arrival_date.apply(
+                lambda x: x.strftime(DATE_FORMAT) if x is not None else None
+            )
+        self.db["xr"].insert_many(df.to_dict("records"))
+        print(
+            "{0} {1} to {2} {3} downloaded".format(
+                index, start_date, end_date, self.__class__.__name__,
+            )
+        )
 
 
 class WeeklyPrice(DailyPrice):
@@ -264,3 +379,26 @@ class MonthlyPrice(WeeklyPrice):
         stock_weekly_df = stock_weekly_df.dropna()
         stock_weekly_df["index"] = stock_weekly_df.index
         return stock_weekly_df
+
+
+class Valuation(SecurityBase):
+    def __init__(self):
+        super(Valuation, self).__init__("Valuation")
+        self.securityType = "stock"
+        self.index_column = "day"
+        self.specify_date = True
+        self.start_date = datetime.strptime("2020-01-01", DATE_FORMAT)
+        self.end_date = datetime.strptime("2020-06-30", DATE_FORMAT)
+
+    def query(self, index, start_date, end_date):
+        accumulative_df = pd.DataFrame()
+        # if start_date < datetime.strptime("2020-07-01", DATE_FORMAT):
+
+        for single_date in daterange(start_date, end_date):
+            q = query(valuation).filter(valuation.code == index)
+            df = get_fundamentals(q, single_date.strftime(DATE_FORMAT))
+            if not df.empty:
+                accumulative_df = accumulative_df.append(df)
+        if not accumulative_df.empty:
+            accumulative_df["day"] = pd.to_datetime(accumulative_df["day"])
+        return accumulative_df

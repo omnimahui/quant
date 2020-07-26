@@ -1,6 +1,14 @@
 # encoding: UTF-8
-
 from __future__ import print_function
+
+from price import *
+from industry import *
+from indicators import *
+from finance import *
+from common import *
+from algo import *
+
+
 from abc import ABCMeta, abstractmethod
 import sys
 import json
@@ -34,8 +42,6 @@ import time
 import _pickle as pickle
 
 
-
-
 import math
 import os
 from common import *
@@ -48,6 +54,7 @@ def dot_to_underscore(string: str):
 def underscore_to_dot(string: str):
     return string.replace("_", ".")
 
+
 def timer(func):
     @functools.wraps(func)
     def wrapper_timer(*args, **kwargs):
@@ -59,23 +66,6 @@ def timer(func):
         return value
 
     return wrapper_timer
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_print(value):
@@ -704,22 +694,20 @@ def take_last(array_like):
 
 
 def updateAll():
+    SecurityAdj().updateAll
     Security().update()
     DailyPrice().updateAll()
-    WeeklyPrice().updateAll()
-    MonthlyPrice().updateAll()
     MoneyFlow().updateAll()
     IsST().updateAll()
     MTSS().updateAll()
     Valuation().updateAll()
+    WeeklyPrice().updateAll()
+    MonthlyPrice().updateAll()
     indicators().update()
-    indicators(
-                class_name="WeeklyPrice", db_name="WeeklyIndicators"
-            ).update()
-    indicators(
-                class_name="MonthlyPrice", db_name="MonthlyIndicators"
-            ).update()
-    
+    indicators(class_name="WeeklyPrice", db_name="WeeklyIndicators").update()
+    indicators(class_name="MonthlyPrice", db_name="MonthlyIndicators").update()
+
+
 def test():
     q = (
         query(finance.STK_XR_XD)
@@ -738,6 +726,7 @@ if __name__ == "__main__":
     multiprocessing.set_start_method("spawn")
 
     FUNCTION_MAP = {
+        "updateSecurityAdjustment": SecurityAdj().updateAll,
         "updateSecurities": Security().update,
         "updatePriceD": DailyPrice().updateAll,
         "updatePriceW": WeeklyPrice().updateAll,
@@ -757,6 +746,7 @@ if __name__ == "__main__":
         "hurst": algo().hurst,
         "cadftest": algo().cadftest,
         "percent": algo().percent,
+        "ebittevroc": algo().ebittev,
         "test": IncomeQuarter().loadAll,
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
@@ -777,6 +767,8 @@ if __name__ == "__main__":
         "convertindexprice": convertIndexPrice,
         "loadprice": loadprice,
         "updateAll": updateAll,
+        "updateIndustryPriceD": IndustryDailyPrice().updateAll,
+        "updateConcept": Concept().updateAll,
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=FUNCTION_MAP.keys())

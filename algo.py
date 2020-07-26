@@ -8,9 +8,9 @@ import statsmodels.tsa.vector_ar.vecm as vm
 from genhurst import genhurst
 from datetime import datetime, timedelta
 from common import *
-from price import DailyPrice
+from price import DailyPrice, Valuation, Security
 from finance import IncomeQuarter, BalanceQuarter
-from indicators import Valuation, IsST, MoneyFlow, indicators
+from indicators import IsST, MoneyFlow, indicators
 from industry import Industry
 import pandas as pd
 
@@ -125,10 +125,12 @@ class algo(object):
     def ebit(self, index):
         if not self.incomeQ_df:
             self.incomeQ_df = IncomeQuarter().loadAll()
+        if index not in self.incomeQ_df:
+            return 0
         ebit = (
-            self.incomeQ_df[index]["net_profit"].tail(1).values
-            + self.incomeQ_df[index]["interest_expense"].tail(1).values
-            + self.incomeQ_df[index]["income_tax"].tail(1).values
+            self.incomeQ_df[index]["net_profit"].tail(1).values / 10 ** 8
+            + self.incomeQ_df[index]["interest_expense"].tail(1).values / 10 ** 8
+            + self.incomeQ_df[index]["income_tax"].tail(1).values / 10 ** 8
         )
         return ebit
 
@@ -137,17 +139,39 @@ class algo(object):
             self.balanceQ_df = BalanceQuarter().loadAll()
         if not self.valuation_df:
             self.valuation_df = Valuation().loadAll()
+        if index not in self.balanceQ_df:
+            return 0
+        if index not in self.valuation_df:
+            return 0
         # 市值 + 总债务 - (现金 + 流动资产 - 流动负债) + 优先股 + 少数股东权益
         tev = (
             self.valuation_df[index]["market_cap"].tail(1).values
-            + self.balanceQ_df[index]["total_liability"].tail(1).values
+            + self.balanceQ_df[index]["total_liability"].tail(1).values / 10 ** 8
             + self.balanceQ_df[index]["preferred_shares_equity"].tail(1).values
-            - self.balanceQ_df[index]["cash_equivalents"].tail(1).values
-            - self.balanceQ_df[index]["total_current_assets"].tail(1).values
+            / 10 ** 8
+            # - self.balanceQ_df[index]["cash_equivalents"].tail(1).values/10**8
+            - self.balanceQ_df[index]["total_current_assets"].tail(1).values / 10 ** 8
             + self.balanceQ_df[index]["total_current_liability"].tail(1).values
-            + self.balanceQ_df[index]["minority_interests"].tail(1).values
+            / 10 ** 8
+            + self.balanceQ_df[index]["minority_interests"].tail(1).values / 10 ** 8
         )
         return tev
+
+    def capital(self, index):
+        if index not in self.balanceQ_df:
+            return 0
+        capital = (
+            # 净资产 = 资产总额-负债总额
+            self.balanceQ_df[index]["total_assets"].tail(1).values / 10 ** 8
+            - self.balanceQ_df[index]["total_liability"].tail(1).values / 10 ** 8
+            # 固定资产
+            + self.balanceQ_df[index]["fixed_assets"].tail(1).values / 10 ** 8
+            # 净营运资本 = 流动资产 - 流动负债
+            + self.balanceQ_df[index]["total_current_assets"].tail(1).values / 10 ** 8
+            - self.balanceQ_df[index]["total_current_liability"].tail(1).values
+            / 10 ** 8
+        )
+        return capital
 
     def percent(self):
         # 801192  银行
@@ -179,6 +203,8 @@ class algo(object):
             "801020",
             "801054",
         ]:
+            if industry_index == "801192":
+                print(industry_index)
             stock_list = industries_df[industry_index][0]
             total_res_df = pd.DataFrame()
             for security in self.df_dict.keys():
@@ -209,10 +235,12 @@ class algo(object):
                     )
                     ebit = self.ebit(security)
                     tev = self.tev(security)
+                    capital = self.capital(security)
                     if net_amount_period > 0:
                         res_dict = {}
                         res_dict["security"] = security
                         res_dict["ebit/tev"] = ebit / tev
+                        res_dict["roc"] = ebit / capital
                         res_dict["pct"] = pct
                         res_dict["min_price"] = min_price
                         res_dict["total_net_amount"] = net_amount_period
@@ -230,8 +258,46 @@ class algo(object):
                         # )
             if total_res_df.empty:
                 continue
-            sorted_df = total_res_df.sort_values("ebit/tev", ascending=False)
+            sorted_df = total_res_df.sort_values("roc", ascending=False)
+            sorted_df.to_csv("./{0}-sorted.csv".format(TODAY))
             with pd.option_context(
                 "display.max_rows", None, "display.max_columns", None
             ):  # more options can be specified also
                 print(sorted_df)
+
+    def calEbitTevRoc(self, index):
+        if index == "600519.XSHG":
+            print("600519.XSHG")
+        ebit = self.ebit(index)
+        tev = self.tev(index)
+        capital = self.capital(index)
+        if ebit != 0 and tev != 0:
+            self.ebittev_df = self.ebittev_df.append(
+                pd.DataFrame({"index": index, "ebit/tev": ebit / tev})
+            )
+        if ebit != 0 and capital != 0:
+            self.ebittev_df = self.ebittev_df.append(
+                pd.DataFrame({"index": index, "roc": ebit / capital})
+            )
+
+    def ebittev(self):
+        self.ebittev_df = pd.DataFrame()
+        # self.df_dict = DailyPrice().loadAll()
+        self.securities_df = Security().load()
+        self.securities_df = self.securities_df.loc[
+            (self.securities_df["type"] == "stock")
+            & (self.securities_df["end_date"] > JQDATA_ENDDATE)
+        ]
+
+        self.securities_df["index"].apply(self.calEbitTevRoc)
+        merge_df = self.securities_df.merge(
+            self.ebittev_df, left_on="index", right_on="index"
+        )
+        # merge_df = merge_df.loc[merge_df["ebit/tev"]>0]
+        merge_df = merge_df[merge_df["index"].str.contains("^600|^000")]
+        # sorted_df = merge_df.sort_values("ebit/tev", ascending=False)
+        sorted_df = merge_df.sort_values("roc", ascending=False)
+        with pd.option_context(
+            "display.max_rows", None, "display.max_columns", None
+        ):  # more options can be specified also
+            print(sorted_df[["index", "display_name", "roc"]])

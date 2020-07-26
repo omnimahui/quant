@@ -1,43 +1,15 @@
 # encoding: UTF-8
 
 from pymongo import MongoClient, ASCENDING, DESCENDING
-from price import SecurityBase
+from price import SecurityBase, DailyPrice, WeeklyPrice, MonthlyPrice
 import jqdatasdk as jq
 from jqdatasdk import *
 from datetime import datetime, timedelta
 from common import *
+import os
+import pandas as pd
+import _pickle as pickle
 
-def daterange(start_date, end_date):
-    if isinstance(start_date, str):
-        start_date = datetime.strptime(start_date, DATE_FORMAT)
-    if isinstance(end_date, str):
-        end_date = datetime.strptime(end_date, DATE_FORMAT)
-    if start_date < datetime.strptime("2020-07-15", DATE_FORMAT):
-        start_date = datetime.strptime("2020-07-15", DATE_FORMAT)
-    for n in range(int((end_date - start_date).days + 1)):
-        yield start_date + timedelta(n)
-        
-class Valuation(SecurityBase):
-    def __init__(self):
-        super(Valuation, self).__init__("Valuation")
-        self.securityType = "stock"
-        self.index_column = "day"
-
-    def query(self, index, start_date, end_date):
-        accumulative_df = pd.DataFrame()
-        
-        for single_date in daterange(start_date, end_date):
-            q = query(
-                valuation
-            ).filter(
-                valuation.code == index
-            )
-            df = get_fundamentals(q, single_date.strftime(DATE_FORMAT)) 
-            if not df.empty:
-                accumulative_df = accumulative_df.append(df)
-        if not accumulative_df.empty:
-            accumulative_df["day"] = pd.to_datetime(accumulative_df["day"])    
-        return accumulative_df
 
 class IsST(SecurityBase):
     def __init__(self):
@@ -73,6 +45,7 @@ class MoneyFlow(SecurityBase):
     def query(self, index, start_date, end_date):
         df = get_money_flow(index, start_date, end_date)
         return df
+
 
 class indicators(object):
     def __init__(self, class_name="DailyPrice", db_name="DailyIndicators"):
