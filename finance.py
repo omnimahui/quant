@@ -5,6 +5,7 @@ from jqdatasdk import *
 from datetime import datetime, timedelta
 from common import *
 import numpy as np
+import pandas as pd
 
 
 class FundamentalQuarter(SecurityBase):

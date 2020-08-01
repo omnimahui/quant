@@ -39,23 +39,25 @@ class Industry(object):
         )
         return df
 
+
 class Concept(Industry):
     def __init__(self):
         super(Concept, self).__init__()
         self.db_name = "concept"
         self.db = self.db_conn[self.db_name]
-        
+
     def update(self, concept_code, date):
         stock_list = get_concept_stocks(concept_code, date=date)
-        self.df[concept_code] = pd.Series([stock_list])    
-    
+        self.df[concept_code] = pd.Series([stock_list])
+
     def updateAll(self):
         date = self.end_date
-        #Get concept list
+        # Get concept list
         concept_df = jq.get_concepts()
         concept_index = pd.Series(concept_df.index)
         concept_index.apply(self.update, date=date)
         self.db[date].insert_many(self.df.to_dict("records"))
+
 
 class SW1DailyPrice(SecurityBase):
     def __init__(self, db_name="SW1DailyPrice"):
@@ -114,17 +116,17 @@ class IndustryDailyPrice(SecurityBase):
         self.industryDailyPrice_df = pd.DataFrame()
         self.start_date = "2020-01-01"
         self.end_date = TODAY
-        
+
     def calculate(self, series):
         industry_code = series.name
 
-        #Select the industry stocks dataframe
-        #df_dict = { index: self.dailyprice_df[index] for index in series[0] }
+        # Select the industry stocks dataframe
+        # df_dict = { index: self.dailyprice_df[index] for index in series[0] }
         industry_df = pd.DataFrame()
         for index in series[0]:
             if index not in self.valuation_df:
                 continue
-            index_df = self.valuation_df[index][['circulating_market_cap']]
+            index_df = self.valuation_df[index][["circulating_market_cap"]]
             index_df.columns = [index]
             if industry_df.empty:
                 industry_df = index_df
@@ -132,27 +134,26 @@ class IndustryDailyPrice(SecurityBase):
                 industry_df = industry_df.join(index_df, how="outer")
         if industry_df.empty:
             return
-        #industry_df.iloc[[0]] = industry_df.iloc[0].fillna(0)  
+        # industry_df.iloc[[0]] = industry_df.iloc[0].fillna(0)
         industry_df.iloc[0, :] = industry_df.iloc[0].fillna(0)
-        industry_df=industry_df.fillna(method='ffill')
-        industry_df = industry_df[(industry_df.index >= self.start_date) 
-                                  & (industry_df.index <= self.end_date)]
+        industry_df = industry_df.fillna(method="ffill")
+        industry_df = industry_df[
+            (industry_df.index >= self.start_date)
+            & (industry_df.index <= self.end_date)
+        ]
         industry_sum = industry_df.sum(axis=1)
         self.industryDailyPrice_df[industry_code] = industry_sum
-    
+
     def updateAll(self):
-        #Load all securities daily price
+        # Load all securities daily price
         self.dailyprice_df = DailyPrice().loadAll()
-        #Load all securities valulation
+        # Load all securities valulation
         self.valuation_df = Valuation().loadAll()
-        #Load industries stock list
+        # Load industries stock list
         self.industries_df = Industry().loadAll()
         self.industries_df.apply(self.calculate)
-        #save
+        # save
         self.db["sum"].drop()
         self.industryDailyPrice_df["index"] = self.industryDailyPrice_df.index
         self.db["sum"].insert_many(self.industryDailyPrice_df.to_dict("records"))
-        print ("test")
-
-        
-        
+        print("test")
