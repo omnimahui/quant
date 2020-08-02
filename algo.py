@@ -5,6 +5,7 @@ from hurst import compute_Hc
 import statsmodels.api as sm
 import statsmodels.tsa.stattools as ts
 import statsmodels.tsa.vector_ar.vecm as vm
+import statsmodels.formula.api as smapi
 from genhurst import genhurst
 from datetime import datetime, timedelta
 from common import *
@@ -13,11 +14,13 @@ from finance import IncomeQuarter, BalanceQuarter
 from indicators import IsST, MoneyFlow, indicators
 from industry import Industry
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 
 class algo(object):
     def __init__(self):
-        self.start_date = "2020-01-01"
+        self.start_date = "2019-01-01"
         self.end_date = datetime.now().strftime(DATE_FORMAT)
         self.incomeQ_df = {}
         self.balanceQ_df = {}
@@ -45,44 +48,92 @@ class algo(object):
 
     def cadftest(self):
         self.df_dict = DailyPrice().loadAll()
+        self.security_df = Security().load(securityType="stock")
+        stock_list = self.security_df["index"].to_list()
         # for security_x in self.df_dict.keys():
-        security_x = "000001.XSHG"
-        df_x = self.df_dict[security_x].loc[
-            (self.df_dict[security_x].index > self.start_date)
-            & (self.df_dict[security_x].index <= self.end_date)
-        ]
-        # if df_x.empty or df_x["close"].count() < 8:
-        #    continue
-
-        for security_y in self.df_dict.keys():
-            if security_x == security_y:
+        # security_x = "000858.XSHE"
+        for security_x in self.df_dict.keys():
+            if security_x not in stock_list:
                 continue
-            df_y = self.df_dict[security_y].loc[
-                (self.df_dict[security_y].index > self.start_date)
-                & (self.df_dict[security_y].index <= self.end_date)
+            # if security_x != "000001.XSHG":
+            #    continue
+            df_x = self.df_dict[security_x].loc[
+                (self.df_dict[security_x].index > self.start_date)
+                & (self.df_dict[security_x].index <= self.end_date)
             ]
-            df_y = df_y[df_y[["close"]] != 0]
-            if df_y.empty or df_x["close"].count() != df_y["close"].count():
-                continue
+            # if df_x.empty or df_x["close"].count() < 8:
+            #    continue
 
-            coint_t1, pvalue1, crit_value1 = ts.coint(df_x["close"], df_y["close"])
-            coint_t2, pvalue2, crit_value2 = ts.coint(df_y["close"], df_x["close"])
-            t = 0
-            crit_value = []
-            if coint_t1 < coint_t2:
-                t = coint_t1
-                crit_value = crit_value1
-            else:
-                t = coint_t2
-                crit_value = crit_value2
-            if t > crit_value[2]:
-                print(
-                    "{0} and {1} {2} - {3}".format(
-                        security_x, security_y, self.start_date, self.end_date
+            for security_y in self.df_dict.keys():
+                if security_y not in stock_list:
+                    continue
+                if security_x == security_y:
+                    continue
+                # if security_y != "600519.XSHG":
+                #    continue
+                df_y = self.df_dict[security_y].loc[
+                    (self.df_dict[security_y].index > self.start_date)
+                    & (self.df_dict[security_y].index <= self.end_date)
+                ]
+                df_y = df_y[df_y[["close"]] != 0]
+                if df_y.empty or df_x["close"].count() != df_y["close"].count():
+                    continue
+
+                coint_t1, pvalue1, crit_value1 = ts.coint(df_x["close"], df_y["close"])
+                coint_t2, pvalue2, crit_value2 = ts.coint(df_y["close"], df_x["close"])
+                t = 0
+                crit_value = []
+                pair_msg = ""
+                df = pd.DataFrame()
+                if coint_t1 < coint_t2:
+                    t = coint_t1
+                    crit_value = crit_value1
+                    pair_msg = "{} vs {}".format(security_x, security_y)
+                    df = pd.concat([df_x["close"], df_y["close"]], axis=1)
+                else:
+                    t = coint_t2
+                    crit_value = crit_value2
+                    pair_msg = "{} vs {}".format(security_y, security_x)
+                    df = pd.concat([df_y["close"], df_x["close"]], axis=1)
+                if t < crit_value[0]:
+                    df.fillna(method="ffill", inplace=True)
+                    df.columns = ["x", "y"]
+                    results = smapi.ols(formula="x ~ y", data=df).fit()
+                    hedgeRatio = results.params[1]
+                    print(
+                        "{} {} - {} hedgeRatio={} t={} Critical Values 0:{}".format(
+                            pair_msg,
+                            self.start_date,
+                            self.end_date,
+                            hedgeRatio,
+                            t,
+                            crit_value[0],
+                        )
                     )
-                )
-                print("CADF Statistic: %f" % t)
-                print("Critical Values: %f" % crit_value[2])
+                    pd.DataFrame((df["x"] - hedgeRatio * df["y"])).plot()
+                    plt.show()
+
+    def johansen(self):
+        self.df_dict = DailyPrice().loadAll()
+        self.security_df = Security().load(securityType="stock")
+        df = self.df_dict["600387.XSHG"]["close"]
+        df = pd.concat([df, self.df_dict["603877.XSHG"]["close"]], axis=1)
+        df = pd.concat([df, self.df_dict["002741.XSHE"]["close"]], axis=1)
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+        result = vm.coint_johansen(df.values, det_order=0, k_ar_diff=1)
+        print(result.lr1)
+        print(result.cvt)
+        print(result.lr2)
+        print(result.cvm)
+
+        print(result.eig)  # eigenvalues
+        print(result.evec)  # eigenvectors
+
+        yport = pd.DataFrame(
+            np.dot(df.values, result.evec[:, 0])
+        )  #  (net) market value of portfolio
+        yport.plot()
+        plt.show()
 
     def hurst(self):
         self.df_dict = DailyPrice().loadAll()
@@ -301,3 +352,114 @@ class algo(object):
             "display.max_rows", None, "display.max_columns", None
         ):  # more options can be specified also
             print(sorted_df[["index", "display_name", "roc"]])
+
+    def kalman(self, index1="000858.XSHE", index2="600519.XSHG"):
+        self.df_dict = DailyPrice().loadAll()
+        df1 = self.df_dict[index1].close
+        df2 = self.df_dict[index2].close
+        df = pd.concat([df1, df2], axis=1, join="inner")
+        df.columns = [index1, index2]
+
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+
+        x = df[index1]
+        y = df[index2]
+
+        x = np.array(ts.add_constant(x))[
+            :, [1, 0]
+        ]  # Augment x with ones to  accomodate possible offset in the regression between y vs x.
+
+        delta = 0.0001  # delta=1 gives fastest change in beta, delta=0.000....1 allows no change (like traditional linear regression).
+
+        yhat = np.full(y.shape[0], np.nan)  # measurement prediction
+        e = yhat.copy()
+        Q = yhat.copy()
+
+        # For clarity, we denote R(t|t) by P(t). Initialize R, P and beta.
+        R = np.zeros((2, 2))
+        P = R.copy()
+        beta = np.full((2, x.shape[0]), np.nan)
+        Vw = delta / (1 - delta) * np.eye(2)
+        Ve = 0.001
+
+        # Initialize beta(:, 1) to zero
+        beta[:, 0] = 0
+
+        # Given initial beta and R (and P)
+        for t in range(len(y)):
+            if t > 0:
+                beta[:, t] = beta[:, t - 1]
+                R = P + Vw
+
+            yhat[t] = np.dot(x[t, :], beta[:, t])
+            #    print('FIRST: yhat[t]=', yhat[t])
+
+            Q[t] = np.dot(np.dot(x[t, :], R), x[t, :].T) + Ve
+            #    print('Q[t]=', Q[t])
+
+            # Observe y(t)
+            e[t] = y[t] - yhat[t]  # measurement prediction error
+            #    print('e[t]=', e[t])
+            #    print('SECOND: yhat[t]=', yhat[t])
+
+            K = np.dot(R, x[t, :].T) / Q[t]  #  Kalman gain
+            #    print(K)
+
+            beta[:, t] = beta[:, t] + np.dot(K, e[t])  #  State update. Equation 3.11
+            #    print(beta[:, t])
+
+            P = R - np.dot(
+                np.dot(K, x[t, :]), R
+            )  # State covariance update. Euqation 3.12
+        #    print(R)
+
+        plt.plot(beta[0, :])
+        plt.plot(beta[1, :])
+        # plt.plot(e[2:])
+        # plt.plot(np.sqrt(Q[2:]))
+        plt.show()
+
+        longsEntry = e < -np.sqrt(Q)
+        longsExit = e > 0
+
+        shortsEntry = e > np.sqrt(Q)
+        shortsExit = e < 0
+
+        numUnitsLong = np.zeros(longsEntry.shape)
+        numUnitsLong[:] = np.nan
+
+        numUnitsShort = np.zeros(shortsEntry.shape)
+        numUnitsShort[:] = np.nan
+
+        numUnitsLong[0] = 0
+        numUnitsLong[longsEntry] = 1
+        numUnitsLong[longsExit] = 0
+        numUnitsLong = pd.DataFrame(numUnitsLong)
+        numUnitsLong.fillna(method="ffill", inplace=True)
+
+        numUnitsShort[0] = 0
+        numUnitsShort[shortsEntry] = -1
+        numUnitsShort[shortsExit] = 0
+        numUnitsShort = pd.DataFrame(numUnitsShort)
+        numUnitsShort.fillna(method="ffill", inplace=True)
+
+        numUnits = numUnitsLong + numUnitsShort
+        positions = pd.DataFrame(
+            np.tile(numUnits.values, [1, 2])
+            * ts.add_constant(-beta[0, :].T)[:, [1, 0]]
+            * df.values
+        )  #  [hedgeRatio -ones(size(hedgeRatio))] is the shares allocation, [hedgeRatio -ones(size(hedgeRatio))].*y2 is the dollar capital allocation, while positions is the dollar capital in each ETF.
+        pnl = np.sum(
+            (positions.shift().values) * (df.pct_change().values), axis=1
+        )  # daily P&L of the strategy
+        ret = pnl / np.sum(np.abs(positions.shift()), axis=1)
+        (np.cumprod(1 + ret) - 1).plot()
+        plt.show()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + ret) ** (252 / len(ret)) - 1,
+                np.sqrt(252) * np.mean(ret) / np.std(ret),
+            )
+        )
+        # APR=0.313225 Sharpe=3.464060

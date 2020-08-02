@@ -703,6 +703,7 @@ def updateAll():
     Valuation().updateAll()
     WeeklyPrice().updateAll()
     MonthlyPrice().updateAll()
+    IndustryDailyPrice().updateAll
     indicators().update()
     indicators(class_name="WeeklyPrice", db_name="WeeklyIndicators").update()
     indicators(class_name="MonthlyPrice", db_name="MonthlyIndicators").update()
@@ -748,6 +749,8 @@ if __name__ == "__main__":
         "percent": algo().percent,
         "ebittevroc": algo().ebittev,
         "test": IncomeQuarter().loadAll,
+        "kalman": algo().kalman,
+        "johansen": algo().johansen,
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
             class_name="WeeklyPrice", db_name="WeeklyIndicators"
