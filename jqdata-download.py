@@ -9,6 +9,7 @@ from common import *
 from algo import *
 
 
+
 from abc import ABCMeta, abstractmethod
 import sys
 import json
@@ -20,7 +21,7 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 import pandas as pd
 import numpy as np
 
-from vnpy.trader.object import BarData, TickData
+#from vnpy.trader.object import BarData, TickData
 
 # from vnpy.trader.app.ctaStrategy.ctaBase import (MINUTE_DB_NAME,
 #                                                 DAILY_DB_NAME,
@@ -751,6 +752,9 @@ if __name__ == "__main__":
         "test": IncomeQuarter().loadAll,
         "kalman": algo().kalman,
         "johansen": algo().johansen,
+        "index_vs_stocks": algo().index_vs_stocks,
+        "longShortStocks": algo().longShortStocks,
+        "correl": algo().correl,
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
             class_name="WeeklyPrice", db_name="WeeklyIndicators"
@@ -771,14 +775,14 @@ if __name__ == "__main__":
         "loadprice": loadprice,
         "updateAll": updateAll,
         "updateIndustryPriceD": IndustryDailyPrice().updateAll,
-        "updateConcept": Concept().updateAll,
+        "updateConcept": Concept().updateAll
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=FUNCTION_MAP.keys())
 
     args = parser.parse_args()
 
-    JQData.connect()
+    #JQData.connect()
     func = FUNCTION_MAP[args.command]
 
     func()
@@ -796,7 +800,7 @@ if __name__ == "__main__":
     # get_stocks_value_orderby_date()
     # get_all_fundamentals()
 
-    JQData.disconnect()
+    #JQData.disconnect()
 
 
 #                    fundamental_db.indicator.delete_one({"$and": [{"quarter_or_year": str(year)+'q'+str(i)},

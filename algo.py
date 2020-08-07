@@ -16,12 +16,16 @@ from industry import Industry
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats.stats import pearsonr
 
 
 class algo(object):
-    def __init__(self):
-        self.start_date = "2019-01-01"
-        self.end_date = datetime.now().strftime(DATE_FORMAT)
+    def __init__(self):  
+        self.start_date = "2018-01-01"
+        self.end_date = "2020-08-01"#datetime.now().strftime(DATE_FORMAT)
+        self.training_start_date = "2016-01-27"
+        self.training_end_date = "2018-91-27"
+
         self.incomeQ_df = {}
         self.balanceQ_df = {}
         self.valuation_df = {}
@@ -116,9 +120,9 @@ class algo(object):
     def johansen(self):
         self.df_dict = DailyPrice().loadAll()
         self.security_df = Security().load(securityType="stock")
-        df = self.df_dict["600387.XSHG"]["close"]
-        df = pd.concat([df, self.df_dict["603877.XSHG"]["close"]], axis=1)
-        df = pd.concat([df, self.df_dict["002741.XSHE"]["close"]], axis=1)
+        df = self.df_dict["603877.XSHG"]["close"]
+        df = pd.concat([df, self.df_dict["603677.XSHG"]["close"]], axis=1)
+        df = pd.concat([df, self.df_dict["002182.XSHE"]["close"]], axis=1)
         df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
         result = vm.coint_johansen(df.values, det_order=0, k_ar_diff=1)
         print(result.lr1)
@@ -132,7 +136,222 @@ class algo(object):
         yport = pd.DataFrame(
             np.dot(df.values, result.evec[:, 0])
         )  #  (net) market value of portfolio
-        yport.plot()
+        # yport.plot()
+        # plt.show()
+        ylag = yport.shift()
+        deltaY = yport - ylag
+        df2 = pd.concat([ylag, deltaY], axis=1)
+        df2.columns = ["ylag", "deltaY"]
+        regress_results = smapi.ols(
+            formula="deltaY ~ ylag", data=df2
+        ).fit()  # Note this can deal with NaN in top row
+        print(regress_results.params)
+
+        halflife = -np.log(2) / regress_results.params["ylag"]
+        print("halflife=%f days" % halflife)
+
+        #  Apply a simple linear mean reversion strategy to EWA-EWC-IGE
+        lookback = np.round(halflife).astype(
+            int
+        )  #  setting lookback to the halflife found above
+        numUnits = (
+            -(yport - yport.rolling(lookback).mean()) / yport.rolling(lookback).std()
+        )  # capital invested in portfolio in dollars.  movingAvg and movingStd are functions from epchan.com/book2
+        positions = pd.DataFrame(
+            np.dot(numUnits.values, np.expand_dims(result.evec[:, 0], axis=1).T)
+            * df.values
+        )  # results.evec(:, 1)' can be viewed as the capital allocation, while positions is the dollar capital in each ETF.
+        pnl = np.sum(
+            (positions.shift().values) * (df.pct_change().values), axis=1
+        )  # daily P&L of the strategy
+        ret = pnl / np.sum(np.abs(positions.shift()), axis=1)
+        pd.DataFrame((np.cumprod(1 + ret) - 1)).plot()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + ret) ** (252 / len(ret)) - 1,
+                np.sqrt(252) * np.mean(ret) / np.std(ret),
+            )
+        )
+        plt.show()
+
+    def index_vs_stocks(self):
+        df_dict = DailyPrice().loadAll()
+        df = DailyPrice().loadAll_to_df(column="close", securityType="stock")
+        trainDataIdx = df.index[
+            (df.index > self.training_start_date) & (df.index <= self.training_end_date)
+        ]
+        testDataIdx = df.index[df.index > self.start_date]
+        # df.iloc[0, :] = df.iloc[0].fillna(0)
+        # df=df.fillna(method='ffill')
+
+        cl_etf = df_dict["000300.XSHG"]["close"]
+
+        isCoint = np.full(df.shape[1], False)
+        for s in range(df.shape[1]):
+            # Combine the two time series into a matrix y2 for input into Johansen test
+            y2 = pd.concat(
+                [df.loc[trainDataIdx].iloc[:, s], cl_etf.loc[trainDataIdx]], axis=1
+            )
+            y2 = y2.loc[
+                y2.notnull().all(axis=1),
+            ]
+
+            if y2.shape[0] > 100:
+                # Johansen test
+                result = vm.coint_johansen(y2.values, det_order=0, k_ar_diff=1)
+                if result.lr1[0] > result.cvt[0, 2]:
+                    isCoint[s] = True
+
+        print(isCoint.sum())
+        yN = df.loc[trainDataIdx, isCoint]
+        logMktVal_long = np.sum(
+            np.log(yN), axis=1
+        )  # The net market value of the long-only portfolio is same as the "spread"
+
+        # Confirm that the portfolio cointegrates with SPY
+        ytest = pd.concat([logMktVal_long, np.log(cl_etf.loc[trainDataIdx])], axis=1)
+        result = vm.coint_johansen(ytest, det_order=0, k_ar_diff=1)
+        print(result.lr1)
+        print(result.cvt)
+        print(result.lr2)
+        print(result.cvm)
+
+        # Apply linear mean-reversion model on test set
+        yNplus = pd.concat(
+            [df.loc[testDataIdx, isCoint], pd.DataFrame(cl_etf.loc[testDataIdx])],
+            axis=1,
+        )  # Array of stock and ETF prices
+        weights = np.column_stack(
+            (
+                np.full((testDataIdx.shape[0], isCoint.sum()), result.evec[0, 0]),
+                np.full((testDataIdx.shape[0], 1), result.evec[1, 0]),
+            )
+        )  # Array of log market value of stocks and ETF's
+
+        logMktVal = np.sum(
+            weights * np.log(yNplus), axis=1
+        )  # Log market value of long-short portfolio
+
+        # Calculate halflife
+        ylag = logMktVal.shift()
+        deltaY = logMktVal - ylag
+        df2 = pd.concat([ylag, deltaY], axis=1)
+        df2.columns = ["ylag", "deltaY"]
+        regress_results = smapi.ols(
+            formula="deltaY ~ ylag", data=df2
+        ).fit()  # Note this can deal with NaN in top row
+        print(regress_results.params)
+        halflife = -np.log(2) / regress_results.params["ylag"]
+        print("halflife=%f days" % halflife)
+
+        lookback = np.round(halflife).astype(int)
+        numUnits = (
+            -(logMktVal - logMktVal.rolling(lookback).mean())
+            / logMktVal.rolling(lookback).std()
+        )  # capital invested in portfolio in dollars.  movingAvg and movingStd are functions from epchan.com/book2
+        positions = pd.DataFrame(
+            np.expand_dims(numUnits, axis=1) * weights
+        )  # results.evec(:, 1)' can be viewed as the capital allocation, while positions is the dollar capital in each ETF.
+
+        pd.DataFrame(
+            (positions.shift().values)
+            * (np.log(yNplus) - np.log(yNplus.shift()).values)
+        ).plot()
+        plt.show()
+
+        pnl = np.sum(
+            (positions.shift().values)
+            * (np.log(yNplus) - np.log(yNplus.shift()).values),
+            axis=1,
+        )  # daily P&L of the strategy
+        ret = pd.DataFrame(
+            pnl.values / np.sum(np.abs(positions.shift()), axis=1).values
+        )
+        (np.cumprod(1 + ret) - 1).plot()
+        plt.show()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + ret) ** (252 / len(ret)) - 1,
+                np.sqrt(252) * np.mean(ret) / np.std(ret),
+            )
+        )
+
+    def longShortStocks(self):
+        df_dict = DailyPrice().loadAll()
+        df_close = DailyPrice().loadAll_to_df(column="close", securityType="stock")
+        df_close.index = pd.to_datetime(df_close.index)
+        df_open = DailyPrice().loadAll_to_df(column="open", securityType="stock")
+        df_close.index = pd.to_datetime(df_close.index)
+
+        df_close = df_close.loc[
+            (df_close.index >= self.start_date) & (df_close.index <= self.end_date), :,
+        ]
+        df_close.fillna(method="ffill", inplace=True)
+        df_close.fillna(0, inplace=True)
+        df_close = df_close.drop([col for col in df_close.columns if df_close[col][0]==0], axis=1)
+        #df_close=df_close.filter(regex ='^600')
+        
+
+        df_open = df_open.loc[
+            (df_open.index >= self.start_date) & (df_open.index <= self.end_date), :,
+        ]
+        df_open.fillna(method="ffill", inplace=True)        
+        df_open.fillna(0, inplace=True)
+        df_open = df_open.drop([col for col in df_open.columns if df_open[col][0]==0], axis=1)        
+        #df_open=df_open.filter(regex ='^600')
+        
+        ret = df_close.pct_change()  # daily returns
+        marketRet = np.mean(ret, axis=1)  # equal weighted market index return
+
+        weights = -(np.array(ret) - np.reshape(marketRet.values, (ret.shape[0], 1)))
+        weights = weights / pd.DataFrame(np.abs(weights)).sum(axis=1).values.reshape(
+            (weights.shape[0], 1)
+        )
+        weights = pd.DataFrame(
+            weights, columns=df_close.columns, index=np.array(ret.index)
+        )
+
+        dailyret = (weights.shift() * ret).sum(axis=1)  # Capital is always one
+
+        #((1 + dailyret).cumprod() - 1).plot()
+        #plt.show()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + dailyret) ** (252 / len(dailyret)) - 1,
+                np.sqrt(252) * np.mean(dailyret) / np.std(dailyret),
+            )
+        )
+        # APR=13.7%, Sharpe=1.3
+
+        ret = (df_open - df_close.shift()) / df_close.shift()  # daily returns
+
+        marketRet = np.mean(ret, axis=1)  # equal weighted market index return
+
+        weights = -(np.array(ret) - np.reshape(marketRet.values, (ret.shape[0], 1)))
+        weights = weights / pd.DataFrame(np.abs(weights)).sum(axis=1).values.reshape(
+            (weights.shape[0], 1)
+        )
+        weights = pd.DataFrame(
+            weights, columns=df_close.columns, index=np.array(ret.index)
+        )
+
+        #Close at current day
+        #dailyret = (weights * (df_close - df_open) / df_open).sum(axis=1)  # Capital is always one
+        
+        #Close at next day open
+        dailyret = (weights * (df_open.shift(-1) - df_open) / df_open).sum(axis=1)  # Capital is always one
+        
+        ((1 + dailyret).cumprod() - 1).plot()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + dailyret) ** (252 / len(dailyret)) - 1,
+                np.sqrt(252) * np.mean(dailyret) / np.std(dailyret),
+            )
+        )
         plt.show()
 
     def hurst(self):
@@ -463,3 +682,55 @@ class algo(object):
             )
         )
         # APR=0.313225 Sharpe=3.464060
+
+
+
+
+    def correl(self):
+        self.df_dict = DailyPrice().loadAll()
+        df = pd.DataFrame(self.df_dict["000001.XSHG"]["close"])
+        #df = self.df_dict["000001.XSHG"]["close"]
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+        #for lookback in range(1,20):
+        #    for holddays in range(1,20):
+        #for lookback in [1, 5, 10, 25, 60]:
+        #    for holddays in [1, 5, 10, 25, 60]:
+        #        ret_lag=df.pct_change(periods=lookback)
+        #        ret_fut=df.shift(-holddays).pct_change(periods=holddays)
+        #        if (lookback >= holddays):
+        #            indepSet=range(0, ret_lag.shape[0], holddays)
+        #        else:
+        #            indepSet=range(0, ret_lag.shape[0], lookback)
+        #            
+        #        ret_lag=ret_lag.iloc[indepSet]
+        #        ret_fut=ret_fut.iloc[indepSet]
+        #        goodDates=(ret_lag.notna() & ret_fut.notna()).values
+        #        (cc, pval)=pearsonr(ret_lag[goodDates], ret_fut[goodDates])
+        #        #if cc >= 0 and pval <= 0.1:
+        #        print('%4i %4i %7.4f %7.4f' % (lookback, holddays, cc, pval))
+        
+        lookback=9
+        holddays=10
+        
+        longs=df > df.shift(lookback)
+        shorts=df < df.shift(lookback)
+        
+        pos=np.zeros(df.shape)
+        
+        for h in range(holddays-1):
+            long_lag=longs.shift(h).fillna(False)
+            short_lag=shorts.shift(h).fillna(False)
+            pos[long_lag]=pos[long_lag]+1
+            pos[short_lag]=pos[short_lag]-1
+        
+        pos[pos<0] = 0
+        pos=pd.DataFrame(pos)
+        
+        pnl=np.sum(pos.shift().values * df.pct_change().values, axis=1) # daily P&L of the strategy
+        ret=pnl/np.sum(np.abs(pos.shift()), axis=1)
+        cumret=(np.cumprod(1+ret)-1)
+        cumret.plot()
+        plt.show()
+        print('APR=%f Sharpe=%f' % (np.prod(1+ret)**(252/len(ret))-1, np.sqrt(252)*np.mean(ret)/np.std(ret)))
+        maxDD, maxDDD, i=calculateMaxDD(cumret.fillna(0))
+        print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))        
