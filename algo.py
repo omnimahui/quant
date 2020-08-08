@@ -687,33 +687,34 @@ class algo(object):
 
 
     def correl(self):
+        self.start_date = "2020-03-19"
+        self.end_date = "2020-08-07"
         self.df_dict = DailyPrice().loadAll()
-        df = pd.DataFrame(self.df_dict["000001.XSHG"]["close"])
-        #df = self.df_dict["000001.XSHG"]["close"]
+        df = self.df_dict["000001.XSHG"]["close"].to_frame()
         df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
-        #for lookback in range(1,20):
-        #    for holddays in range(1,20):
+        for lookback in range(1,20):
+            for holddays in range(1,20):
         #for lookback in [1, 5, 10, 25, 60]:
         #    for holddays in [1, 5, 10, 25, 60]:
-        #        ret_lag=df.pct_change(periods=lookback)
-        #        ret_fut=df.shift(-holddays).pct_change(periods=holddays)
-        #        if (lookback >= holddays):
-        #            indepSet=range(0, ret_lag.shape[0], holddays)
-        #        else:
-        #            indepSet=range(0, ret_lag.shape[0], lookback)
-        #            
-        #        ret_lag=ret_lag.iloc[indepSet]
-        #        ret_fut=ret_fut.iloc[indepSet]
-        #        goodDates=(ret_lag.notna() & ret_fut.notna()).values
-        #        (cc, pval)=pearsonr(ret_lag[goodDates], ret_fut[goodDates])
-        #        #if cc >= 0 and pval <= 0.1:
-        #        print('%4i %4i %7.4f %7.4f' % (lookback, holddays, cc, pval))
+                ret_lag=df.pct_change(periods=lookback)
+                ret_fut=df.shift(-holddays).pct_change(periods=holddays)
+                if (lookback >= holddays):
+                    indepSet=range(0, ret_lag.shape[0], holddays)
+                else:
+                    indepSet=range(0, ret_lag.shape[0], lookback)
+                    
+                ret_lag=ret_lag.iloc[indepSet]
+                ret_fut=ret_fut.iloc[indepSet]
+                goodDates=(ret_lag.notna() & ret_fut.notna()).values
+                (cc, pval)=pearsonr(ret_lag[goodDates].iloc[:,0], ret_fut[goodDates].iloc[:,0])
+                #if cc >= 0 and pval <= 0.1:
+                print('%4i %4i %7.4f %7.4f' % (lookback, holddays, cc, pval))
         
-        lookback=9
-        holddays=10
+        lookback=6
+        holddays=6
         
-        longs=df > df.shift(lookback)
-        shorts=df < df.shift(lookback)
+        longs=df < df.shift(lookback)
+        shorts=df > df.shift(lookback)
         
         pos=np.zeros(df.shape)
         
@@ -734,3 +735,53 @@ class algo(object):
         print('APR=%f Sharpe=%f' % (np.prod(1+ret)**(252/len(ret))-1, np.sqrt(252)*np.mean(ret)/np.std(ret)))
         maxDD, maxDDD, i=calculateMaxDD(cumret.fillna(0))
         print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))        
+        
+
+    def momentum_top(self):
+        lookback=200#252
+        holddays=25#25
+        topN=50
+        
+        self.start_date = "2015-03-19"
+        self.end_date = "2020-08-01"
+        #self.df_dict = DailyPrice().loadAll()
+        cl = DailyPrice().loadAll_to_df(column="close", securityType="stock")
+        cl.index = pd.to_datetime(cl.index)
+        cl = cl[
+            (cl.index > self.start_date) & (cl.index <= self.end_date)
+        ]        
+        ret=cl.pct_change(periods=lookback)
+        longs=np.full(cl.shape, False)
+        shorts=np.full(cl.shape, False)
+        positions=np.zeros(cl.shape)
+        
+        for t in range(lookback, cl.shape[0]):
+            hasData=np.where(np.isfinite(ret.iloc[t, :]))
+            hasData=hasData[0]
+            if len(hasData)>0:
+                idxSort=np.argsort(ret.iloc[t, hasData])  
+                longs[t, hasData[idxSort.values[np.arange(-np.min((topN, len(idxSort))),0)]]]=1
+                shorts[t, hasData[idxSort.values[np.arange(0,topN)]]]=1
+                
+        longs=pd.DataFrame(longs)
+        shorts=pd.DataFrame(shorts)
+        
+        for h in range(holddays-1):
+            long_lag=longs.shift(h).fillna(False)
+            short_lag=shorts.shift(h).fillna(False)
+            positions[long_lag]=positions[long_lag]+1
+            positions[short_lag]=positions[short_lag]-1
+            
+        positions=pd.DataFrame(positions)
+        tmp = (positions.shift().values)*(cl.pct_change().values)
+        tmp = np.nan_to_num(tmp)
+        ret=pd.DataFrame(np.sum(tmp, axis=1)/(2*topN)/holddays) # daily P&L of the strategy
+        ret.index = cl.index
+        cumret=(np.cumprod(1+ret)-1)
+        cumret.index = cl.index
+        cumret.plot()
+        plt.show()        
+        print('APR=%f Sharpe=%f' % (np.prod(1+ret)**(252/len(ret))-1, np.sqrt(252)*np.mean(ret)/np.std(ret)))
+        maxDD, maxDDD, i=calculateMaxDD(cumret.fillna(0).values)
+        print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))        
+        
