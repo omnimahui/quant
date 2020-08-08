@@ -39,8 +39,6 @@ class FundamentalQuarter(SecurityBase):
         return df
 
     def updateOne(self, index):
-        if index != "600101.XSHG":
-            return
         start_date, end_date = self.security.getSecurityDate(index)
         last_statdate = datetime.strptime(self.start_from, DATE_FORMAT)
 
