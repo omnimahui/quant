@@ -39,6 +39,8 @@ class FundamentalQuarter(SecurityBase):
         return df
 
     def updateOne(self, index):
+        if index != "600101.XSHG":
+            return
         start_date, end_date = self.security.getSecurityDate(index)
         last_statdate = datetime.strptime(self.start_from, DATE_FORMAT)
 
@@ -56,43 +58,46 @@ class FundamentalQuarter(SecurityBase):
         except Exception:
             ...
 
-        orig_start_date = start_date
-        if start_date <= end_date:
-            # Get end_date (today) fundamental
-            df = self.query(index, start_date, end_date)
-            if not df.empty:
-                latest_pubdate = datetime.strptime(df["pubDate"][0], DATE_FORMAT)
-                statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                if statdate > last_statdate:
-                    start_date = latest_pubdate
 
-                accumulative_df = pd.DataFrame()
-                while statdate >= last_statdate:
-                    delta = end_date - start_date
-                    delta_days = delta.days + 1
-                    newdf = pd.DataFrame(np.repeat(df.values, delta_days, axis=0))
-                    newdf.columns = df.columns
-                    ts = pd.date_range(end_date, periods=delta_days, freq="-1D")
-                    newdf["day"] = ts
-                    self.set_index_column(newdf, self.index_column)
-                    accumulative_df = accumulative_df.append(newdf)
-                    if statdate == last_statdate:
-                        self.db[index].insert_many(accumulative_df.to_dict("records"))
-                        break
-
-                    statdate = self.prev_statdate(statdate)
-                    end_date = start_date - timedelta(days=1)
-                    df = self.query(index, start_date, end_date)
-                    if not df.empty:
-                        latest_pubdate = datetime.strptime(
-                            df["pubDate"][0], DATE_FORMAT
-                        )
-                        statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
-                        if statdate > last_statdate:
-                            start_date = latest_pubdate
-                        else:
-                            start_date = orig_start_date
-
+        try:        
+            orig_start_date = start_date
+            if start_date <= end_date:
+                # Get end_date (today) fundamental
+                df = self.query(index, start_date, end_date)
+                if not df.empty:
+                    latest_pubdate = datetime.strptime(df["pubDate"][0], DATE_FORMAT)
+                    statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
+                    if statdate > last_statdate:
+                        start_date = latest_pubdate
+            
+                    accumulative_df = pd.DataFrame()
+                    while statdate >= last_statdate:
+                        delta = end_date - start_date
+                        delta_days = delta.days + 1
+                        newdf = pd.DataFrame(np.repeat(df.values, delta_days, axis=0))
+                        newdf.columns = df.columns
+                        ts = pd.date_range(end_date, periods=delta_days, freq="-1D")
+                        newdf["day"] = ts
+                        self.set_index_column(newdf, self.index_column)
+                        accumulative_df = accumulative_df.append(newdf)
+                        if statdate == last_statdate:
+                            self.db[index].insert_many(accumulative_df.to_dict("records"))
+                            break
+            
+                        statdate = self.prev_statdate(statdate)
+                        end_date = start_date - timedelta(days=1)
+                        df = self.query(index, start_date, end_date)
+                        if not df.empty:
+                            latest_pubdate = datetime.strptime(
+                                df["pubDate"][0], DATE_FORMAT
+                            )
+                            statdate = datetime.strptime(df["statDate"][0], DATE_FORMAT)
+                            if statdate > last_statdate:
+                                start_date = latest_pubdate
+                            else:
+                                start_date = orig_start_date
+        except Exception as ex:
+            print ("Got exception index={} {}".format(index, ex))
 
 class IncomeQuarter(FundamentalQuarter):
     def __init__(self, db_name="IncomeQuarter"):
