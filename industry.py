@@ -152,8 +152,8 @@ class IndustryDailyPrice(SecurityBase):
         #save
         self.db["sum"].drop()
         self.industryDailyPrice_df["index"] = self.industryDailyPrice_df.index
-        self.db["sum"].insert_many(self.industryDailyPrice_df.to_dict("records"))
-        print ("test")
+        if not self.industryDailyPrice_df.empty:
+            self.db["sum"].insert_many(self.industryDailyPrice_df.to_dict("records"))
 
         
         
