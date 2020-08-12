@@ -20,7 +20,7 @@ JQDATA_STARTDATE = "2005-01-01"
 JQDATA_ENDDATE = datetime.now().strftime(DATE_FORMAT)
 TODAY=datetime.now().strftime(DATE_FORMAT)
 DASK_NPARTITIONS = 50
-MONGODB_HOST = "192.168.1.18"
+MONGODB_HOST = "127.0.0.1"
 
 
 class JQData(object):

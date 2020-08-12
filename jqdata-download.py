@@ -1,5 +1,5 @@
 # encoding: UTF-8
-from __future__ import print_function
+#from __future__ import print_function
 
 from price import *
 from industry import *
@@ -7,6 +7,7 @@ from indicators import *
 from finance import *
 from common import *
 from algo import *
+from USprice import *
 
 
 
@@ -730,7 +731,9 @@ if __name__ == "__main__":
     FUNCTION_MAP = {
         "updateSecurityAdjustment": SecurityAdj().updateAll,
         "updateSecurities": Security().update,
+        "updateUSSecurities": USSecurity().update,
         "updatePriceD": DailyPrice().updateAll,
+        "updateUSPriceD": USDailyPrice().updateAll,
         "updatePriceW": WeeklyPrice().updateAll,
         "updatePriceM": MonthlyPrice().updateAll,
         "updateIndustry": Industry().updateAll,

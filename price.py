@@ -17,10 +17,13 @@ class Security(object):
     def __init__(self):
         self.db_name = "securities"
         self.cl_name = "securities"
+        self.db_conn()
+
+    def db_conn(self):
         self.db_conn = MongoClient(host=MONGODB_HOST)
         self.db = self.db_conn[self.db_name]
         self.cl = self.db[self.cl_name]
-        # self.securities_df["index" == index]
+
 
     @JQData_decorate
     def update(self):
@@ -52,10 +55,11 @@ class Security(object):
         return start_date, end_date
 
 
+
 class SecurityBase(object):
     __metaclass__ = ABCMeta
 
-    def __init__(self, db_name):
+    def __init__(self, db_name, security=Security):
         self.db_conn = MongoClient(host=MONGODB_HOST)
         self.db_name = db_name
         self.df_dict = {}
@@ -67,13 +71,13 @@ class SecurityBase(object):
         self.specify_date = False
         self.db_connect()
         self.df = pd.DataFrame()
+        self.security = security()
 
     def db_connect(self):
         self.db_conn = MongoClient(host=MONGODB_HOST)
         self.db = self.db_conn[self.db_name]
 
     def loadFieldsFromDB(self, fields=["index"]):
-        self.security = Security()
         self.df_dict = dict.fromkeys(self.db.list_collection_names(), pd.DataFrame())
         filter = {}
         filter["_id"] = 0
