@@ -10,14 +10,11 @@ import pandas as pd
 
 class FundamentalQuarter(SecurityBase):
     def __init__(self, db_name="FundamentalQuarter"):
+        super().__init__(db_name)
         self.securityType = "stock"
         self.index_column = "day"
         self.fieldsFromDb = ["index", "statDate"]
         self.start_from = "2004-09-30"
-        self.db_name = db_name
-        self.pickle_file = self.__class__.__name__ + ".pkl"
-        # super(FundamentalQuarter, self).__init__(db_name)
-        self.db_connect()
 
     def prev_statdate(self, statdate):
         if statdate.month < 4:
@@ -99,13 +96,11 @@ class FundamentalQuarter(SecurityBase):
 
 class IncomeQuarter(FundamentalQuarter):
     def __init__(self, db_name="IncomeQuarter"):
-        self.db_name = db_name
+        super().__init__(db_name)
         self.securityType = "stock"
         self.index_column = "end_date"
         self.fieldsFromDb = ["index", "end_date"]
         self.start_from = "2004-09-30"
-        self.pickle_file = self.__class__.__name__ + ".pkl"
-        self.db_connect()
 
     def query(self, index, start_date, end_date):
         q = (
@@ -152,14 +147,12 @@ class IncomeQuarter(FundamentalQuarter):
 
 class BalanceQuarter(IncomeQuarter):
     def __init__(self, db_name="BalanceQuarter"):
-        self.db_name = db_name
+        super().__init__(db_name)
         self.securityType = "stock"
         self.index_column = "end_date"
         self.fieldsFromDb = ["index", "end_date"]
         self.start_from = "2004-09-30"
-        self.pickle_file = self.__class__.__name__ + ".pkl"
-        self.db_connect()
-
+        
     def query(self, index, start_date, end_date):
         q = (
             query(finance.STK_BALANCE_SHEET)

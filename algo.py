@@ -791,8 +791,201 @@ class algo(object):
         self.start_date = "2020-01-01"
         self.end_date = "2020-08-10"
         self.df_dict = USDailyPrice().loadAll()
-        df = self.df_dict["GLD"]["close"].to_frame()
+        df = self.df_dict[index]["close"].to_frame()
         df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]        
         r = df.close.pct_change()
         kelly = r.rolling(60).mean()/r.rolling(60).var()
         print (kelly)
+        
+        
+    def cadftestUS(self, security_x="GLD", security_y="GDX"):
+        self.start_date = "2015-01-01"
+        self.end_date = JQDATA_ENDDATE     
+        self.df_dict = USDailyPrice().loadAll()
+        df_x = self.df_dict[security_x].loc[
+            (self.df_dict[security_x].index > self.start_date)
+            & (self.df_dict[security_x].index <= self.end_date)
+        ]        
+        
+        df_y = self.df_dict[security_y].loc[
+            (self.df_dict[security_y].index > self.start_date)
+            & (self.df_dict[security_y].index <= self.end_date)
+        ]        
+        df_x = df_x[df_x[["close"]] != 0]
+        df_y = df_y[df_y[["close"]] != 0]
+        
+        coint_t1, pvalue1, crit_value1 = ts.coint(df_x["close"], df_y["close"])
+        coint_t2, pvalue2, crit_value2 = ts.coint(df_y["close"], df_x["close"])
+        t = 0
+        crit_value = []
+        pair_msg = ""
+        df = pd.DataFrame()
+        if coint_t1 < coint_t2:
+            t = coint_t1
+            crit_value = crit_value1
+            pair_msg = "{} vs {}".format(security_x, security_y)
+            df = pd.concat([df_x["close"], df_y["close"]], axis=1)
+        else:
+            t = coint_t2
+            crit_value = crit_value2
+            pair_msg = "{} vs {}".format(security_y, security_x)
+            df = pd.concat([df_y["close"], df_x["close"]], axis=1)
+        if t < crit_value[2]:
+            df.fillna(method="ffill", inplace=True)
+            df.columns = ["x", "y"]
+            results = smapi.ols(formula="x ~ y", data=df).fit()
+            hedgeRatio = results.params[1]
+            print(
+                "{} {} - {} hedgeRatio={} t={} Critical Values 0:{}".format(
+                    pair_msg,
+                    self.start_date,
+                    self.end_date,
+                    hedgeRatio,
+                    t,
+                    crit_value[0],
+                )
+            )
+            pd.DataFrame((df["x"] - hedgeRatio * df["y"])).plot()
+            plt.show()                
+        
+    def johansenUS(self):
+        self.df_dict = USDailyPrice().loadAll()
+        df = self.df_dict["GLD"]["close"]
+        df = pd.concat([df, self.df_dict["UUP"]["close"]], axis=1)
+        df = pd.concat([df, self.df_dict["TLT"]["close"]], axis=1)
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+        result = vm.coint_johansen(df.values, det_order=0, k_ar_diff=1)
+        print(result.lr1)
+        print(result.cvt)
+        print(result.lr2)
+        print(result.cvm)
+
+        print(result.eig)  # eigenvalues
+        print(result.evec)  # eigenvectors
+
+        yport = pd.DataFrame(
+            np.dot(df.values, result.evec[:, 0])
+        )  #  (net) market value of portfolio
+        # yport.plot()
+        # plt.show()
+        ylag = yport.shift()
+        deltaY = yport - ylag
+        df2 = pd.concat([ylag, deltaY], axis=1)
+        df2.columns = ["ylag", "deltaY"]
+        regress_results = smapi.ols(
+            formula="deltaY ~ ylag", data=df2
+        ).fit()  # Note this can deal with NaN in top row
+        print(regress_results.params)
+
+        halflife = -np.log(2) / regress_results.params["ylag"]
+        print("halflife=%f days" % halflife)
+
+        #  Apply a simple linear mean reversion strategy to EWA-EWC-IGE
+        lookback = np.round(halflife).astype(
+            int
+        )  #  setting lookback to the halflife found above
+        numUnits = (
+            -(yport - yport.rolling(lookback).mean()) / yport.rolling(lookback).std()
+        )  # capital invested in portfolio in dollars.  movingAvg and movingStd are functions from epchan.com/book2
+        positions = pd.DataFrame(
+            np.dot(numUnits.values, np.expand_dims(result.evec[:, 0], axis=1).T)
+            * df.values
+        )  # results.evec(:, 1)' can be viewed as the capital allocation, while positions is the dollar capital in each ETF.
+        pnl = np.sum(
+            (positions.shift().values) * (df.pct_change().values), axis=1
+        )  # daily P&L of the strategy
+        ret = pnl / np.sum(np.abs(positions.shift()), axis=1)
+        pd.DataFrame((np.cumprod(1 + ret) - 1)).plot()
+        print(
+            "APR=%f Sharpe=%f"
+            % (
+                np.prod(1 + ret) ** (252 / len(ret)) - 1,
+                np.sqrt(252) * np.mean(ret) / np.std(ret),
+            )
+        )
+        plt.show()
+        
+        
+
+    def correlUS(self):
+        self.start_date = "2018-03-19"
+        self.end_date = "2020-08-07"
+        self.df_dict = USDailyPrice().loadAll()
+        df = self.df_dict["GLD"]["close"].to_frame()
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+        for lookback in range(1,20):
+            for holddays in range(1,20):
+        #for lookback in [1, 5, 10, 25, 60]:
+        #    for holddays in [1, 5, 10, 25, 60]:
+                ret_lag=df.pct_change(periods=lookback)
+                ret_fut=df.shift(-holddays).pct_change(periods=holddays)
+                if (lookback >= holddays):
+                    indepSet=range(0, ret_lag.shape[0], holddays)
+                else:
+                    indepSet=range(0, ret_lag.shape[0], lookback)
+                    
+                ret_lag=ret_lag.iloc[indepSet]
+                ret_fut=ret_fut.iloc[indepSet]
+                goodDates=(ret_lag.notna() & ret_fut.notna()).values
+                (cc, pval)=pearsonr(ret_lag[goodDates].iloc[:,0], ret_fut[goodDates].iloc[:,0])
+                #if cc >= 0 and pval <= 0.1:
+                print('%4i %4i %7.4f %7.4f' % (lookback, holddays, cc, pval))
+        
+        lookback=13
+        holddays=11
+        
+        longs=df < df.shift(lookback)
+        shorts=df > df.shift(lookback)
+        
+        pos=np.zeros(df.shape)
+        
+        for h in range(holddays-1):
+            long_lag=longs.shift(h).fillna(False)
+            short_lag=shorts.shift(h).fillna(False)
+            pos[long_lag]=pos[long_lag]+1
+            pos[short_lag]=pos[short_lag]-1
+        
+        pos[pos<0] = 0
+        pos=pd.DataFrame(pos)
+        
+        pnl=np.sum(pos.shift().values * df.pct_change().values, axis=1) # daily P&L of the strategy
+        ret=pnl/np.sum(np.abs(pos.shift()), axis=1)
+        cumret=(np.cumprod(1+ret)-1)
+        cumret.plot()
+        plt.show()
+        print('APR=%f Sharpe=%f' % (np.prod(1+ret)**(252/len(ret))-1, np.sqrt(252)*np.mean(ret)/np.std(ret)))
+        maxDD, maxDDD, i=calculateMaxDD(cumret.fillna(0))
+        print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))        
+        
+        
+    def ret_std(self, index = "GLD"):
+        self.start_date = "2016-01-01"
+        self.end_date = TODAY        
+        self.df_dict = USDailyPrice().loadAll()
+        df = self.df_dict["GLD"]["close"].to_frame()   
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]
+        df['log_rtn'] = np.log(df.close/df.close.shift(1))
+        df = df[['close', 'log_rtn']].dropna(how = 'any')   
+        df['moving_std_252'] = df[['log_rtn']].rolling(window=252).std()
+        df['moving_std_21'] = df[['log_rtn']].rolling(window=21).std()
+        fig, ax = plt.subplots(3, 1, figsize=(18, 15), 
+                               sharex=True)
+        
+        df.close.plot(ax=ax[0])
+        ax[0].set(title=index+' time series',
+                  ylabel='Stock price ($)')
+        
+        df.log_rtn.plot(ax=ax[1])
+        ax[1].set(ylabel='Log returns (%)')
+        
+        df.moving_std_252.plot(ax=ax[2], color='r', 
+                               label='Moving Volatility 252d')
+        df.moving_std_21.plot(ax=ax[2], color='g', 
+                              label='Moving Volatility 21d')
+        ax[2].set(ylabel='Moving Volatility',
+                  xlabel='Date')
+        ax[2].legend()
+        
+        # plt.tight_layout()
+        # plt.savefig('images/ch1_im15.png')
+        plt.show()        
