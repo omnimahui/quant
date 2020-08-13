@@ -10,6 +10,7 @@ from genhurst import genhurst
 from datetime import datetime, timedelta
 from common import *
 from price import DailyPrice, Valuation, Security
+from USprice import *
 from finance import IncomeQuarter, BalanceQuarter
 from indicators import IsST, MoneyFlow, indicators
 from industry import Industry
@@ -783,5 +784,15 @@ class algo(object):
         plt.show()        
         print('APR=%f Sharpe=%f' % (np.prod(1+ret)**(252/len(ret))-1, np.sqrt(252)*np.mean(ret)/np.std(ret)))
         maxDD, maxDDD, i=calculateMaxDD(cumret.fillna(0).values)
-        print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))        
+        print('Max DD=%f Max DDD in days=%i' % (maxDD, maxDDD))     
         
+        
+    def kelly(self, index="GLD"):
+        self.start_date = "2020-01-01"
+        self.end_date = "2020-08-10"
+        self.df_dict = USDailyPrice().loadAll()
+        df = self.df_dict["GLD"]["close"].to_frame()
+        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]        
+        r = df.close.pct_change()
+        kelly = r.rolling(60).mean()/r.rolling(60).var()
+        print (kelly)

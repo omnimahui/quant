@@ -39,7 +39,8 @@ class USSecurity(Security):
         rows = [row for row in reader
                 if (row.get('assetType') == 'Stock' or row.get('assetType') == 'ETF') and
                 row.get('priceCurrency') == 'USD' and row.get('endDate') != '' and (row.get('exchange') == 'NYSE'
-                or row.get('exchange') == 'NASDAQ' )]
+                or row.get('exchange') == 'NASDAQ' or row.get('exchange') == 'AMEX' or
+                row.get('exchange') == 'NYSE ARCA')]
         df = pd.DataFrame(rows)
         df.columns=['index','exchange','type','currency','start_date','end_date']
         df['start_date'] = pd.to_datetime(df['start_date'])
@@ -57,7 +58,7 @@ class USDailyPrice(SecurityBase):
     def query(self, index, start_date, end_date):
         df = yf.download(index, 
                                start=start_date, 
-                               end=end_date,
+                               end=end_date+timedelta(days=1),
                                progress=False)
         df=df.drop(columns=["Close"])
         df.columns = ["open","high","low","close","volumn"]

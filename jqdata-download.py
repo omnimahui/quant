@@ -759,6 +759,7 @@ if __name__ == "__main__":
         "longShortStocks": algo().longShortStocks,
         "correl": algo().correl,
         "momentum_top": algo().momentum_top,
+        "kelly": algo().kelly,
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
             class_name="WeeklyPrice", db_name="WeeklyIndicators"
