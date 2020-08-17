@@ -710,6 +710,10 @@ def updateAll():
     indicators(class_name="WeeklyPrice", db_name="WeeklyIndicators").update()
     indicators(class_name="MonthlyPrice", db_name="MonthlyIndicators").update()
 
+def updateAllUS():
+    USSecurity().update()
+    USDailyPrice().updateAll()
+    
 
 def test():
     q = (
@@ -750,20 +754,24 @@ if __name__ == "__main__":
         "adftest": algo().adftest,
         "hurst": algo().hurst,
         "cadftest": algo().cadftest,
-        "cadftestUS": algo().cadftestUS,
         "percent": algo().percent,
         "ebittevroc": algo().ebittev,
         "test": IncomeQuarter().loadAll,
         "kalman": algo().kalman,
         "johansen": algo().johansen,
-        "johansenUS": algo().johansenUS,
         "index_vs_stocks": algo().index_vs_stocks,
         "longShortStocks": algo().longShortStocks,
-        "correl": algo().correl,
-        "correlUS": algo().correlUS,
+        "autoCorrel": algo().autoCorrel,
         "momentum_top": algo().momentum_top,
         "kelly": algo().kelly,
-        "ret_std": algo().ret_std,
+        "volatility": algo().volatility,
+        "pdf": algo().pdf,
+        "acf": algo().acf,
+        "correl": algo().correl,
+        "correlSearch": algo().correlSearch,
+        "priceChart": algo().priceChart,
+        "decompose": algo().decompose,
+        
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
             class_name="WeeklyPrice", db_name="WeeklyIndicators"
@@ -783,6 +791,7 @@ if __name__ == "__main__":
         "convertindexprice": convertIndexPrice,
         "loadprice": loadprice,
         "updateAll": updateAll,
+        "updateAllUS": updateAllUS,
         "updateIndustryPriceD": IndustryDailyPrice().updateAll,
         "updateConcept": Concept().updateAll
     }

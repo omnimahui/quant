@@ -15,6 +15,8 @@ from io import BytesIO as Buffer
 from io import (TextIOWrapper, BytesIO)
 import yfinance as yf
 
+ADDITIONAL_SECURITIES = ["^GSPC","^VIX"]
+
 
 # These methods enable python 2 + 3 compatibility.
 def get_zipfile_from_response(response):
@@ -43,9 +45,20 @@ class USSecurity(Security):
                 row.get('exchange') == 'NYSE ARCA')]
         df = pd.DataFrame(rows)
         df.columns=['index','exchange','type','currency','start_date','end_date']
+        df.drop_duplicates(subset=['index'], keep='first', inplace=True)
         df['start_date'] = pd.to_datetime(df['start_date'])
         df['end_date'] = pd.to_datetime(df['end_date'])
         df["type"] = df["type"].str.lower()
+        
+        #Manully add some securities.
+        for s in ADDITIONAL_SECURITIES:
+            df = df.append({'index': s, 
+                            'exchange': 'NYSE', 
+                            'type':'index', 
+                            'currency':'USD',
+                            'start_date': pd.to_datetime('1985-01-01'),
+                            'end_date': pd.to_datetime(TODAY)}, ignore_index=True)
+            
         self.cl.drop()
         self.cl.insert_many(df.to_dict("records"))
         print ("US security list updated")
@@ -61,7 +74,7 @@ class USDailyPrice(SecurityBase):
                                end=end_date+timedelta(days=1),
                                progress=False)
         df=df.drop(columns=["Close"])
-        df.columns = ["open","high","low","close","volumn"]
+        df.columns = ["open","high","low","close","volume"]
         return df
 
 class SecurityAdj(SecurityBase):

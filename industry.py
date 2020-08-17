@@ -13,7 +13,7 @@ import os
 class Industry(object):
     def __init__(self):
         self.start_date = datetime.now().strftime(DATE_FORMAT)
-        self.end_date = "2020-07-17"
+        self.end_date = "2020-07-17"  #Must be same with collect name in DB
         self.db_name = "industry"
         self.db_conn = MongoClient(host=MONGODB_HOST)
         self.db = self.db_conn[self.db_name]

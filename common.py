@@ -4,6 +4,7 @@ import dask
 from datetime import datetime, timedelta
 import jqdatasdk as jq
 import numpy as np
+import re
 
 config = open("config.json")
 setting = json.load(config)
@@ -94,3 +95,10 @@ def calculateMaxDD(cumret):
     maxDD, i=np.min(drawdown), np.argmin(drawdown) # drawdown < 0 always
     maxDDD=np.max(drawdownduration)
     return maxDD, maxDDD, i
+
+def isChinaMkt(index):
+    if re.match("^[0-9]+", index):
+        return True
+    else:
+        return False
+        
