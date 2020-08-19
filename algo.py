@@ -29,39 +29,66 @@ from plotly.offline import iplot, init_notebook_mode
 import plotly.io as pio
 import plotly
 from fbprophet import Prophet
+import cpi
 
 setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
+
+
+def price_deflate(df):
+    end_date = df.index[-1]
+    df["close_deflated"] = df.apply(lambda x: cpi.inflate(x.close,
+                                    x["index"], 
+                                    end_date),
+                           axis=1)
+    return df
+
+def differencing(df, diff=1):
+    df["diff"] = df.close.diff(diff)
+    return df            
 
 class algo(object):
     def __init__(self):  
         self.start_date = "2018-01-01"
         self.end_date = TODAY
         self.training_start_date = "2016-01-27"
-        self.training_end_date = "2018-91-27"
+        self.training_end_date = "2018-01-27"
 
         self.incomeQ_df = {}
         self.balanceQ_df = {}
         self.valuation_df = {}
 
-    def adftest(self):
-        self.df_dict = DailyPrice().loadAll()
-        for security in self.df_dict.keys():
-            df = self.df_dict[security].loc[
-                (self.df_dict[security].index > self.start_date)
-                & (self.df_dict[security].index <= self.end_date)
-            ]
-            if df.empty or df["close"].count() < 8:
-                continue
-            X = df["close"].dropna().values
-            result = adfuller(X, maxlag=1, regression="c", autolag=None)
-            if result[0] < result[4]["1%"]:
-                print("{0} {1} - {2}".format(security, self.start_date, self.end_date))
-                print("ADF Statistic: %f" % result[0])
-                print("p-value: %f" % result[1])
-                print("Critical Values:")
-                for key, value in result[4].items():
-                    print("\t%s: %.3f" % (key, value))
-                self.halflife(X)
+    def adf(self, index="GLD"):
+        self.start_date = "2016-03-10"
+        self.end_date = "2020-07-31"
+        if isChinaMkt(index):
+            self.df_dict = DailyPrice().loadAll()
+            self.security_df = Security().load(securityType="stock")
+        else:
+            self.df_dict = USDailyPrice().loadAll()
+            self.security_df = USSecurity().load()
+            
+        df = self.df_dict[index].loc[
+            (self.df_dict[index].index > self.start_date)
+            & (self.df_dict[index].index <= self.end_date)
+        ]
+        
+        #if df.empty or df["close"].count() < 8:
+        #    continue
+        df = price_deflate(df)
+        df[['close','close_deflated']].plot(title=index+' Price and Deflated')
+        plt.show()
+        X = df["close_deflated"].dropna().values
+        #result = adfuller(X, maxlag=1, regression="c", autolag=None)  #autolag="AIC"
+        result = adfuller(X, regression="c", autolag="AIC")  #
+        if result[0] < result[4]["1%"]:
+            #null hypothesis is series is not stationary
+            print("{0} {1} - {2}".format(index, self.start_date, self.end_date))
+            print("ADF Statistic: %f" % result[0])
+            print("p-value: %f" % result[1])
+            print("Critical Values:")
+            for key, value in result[4].items():
+                print("\t%s: %.3f" % (key, value))
+            self.halflife(X)
 
     def cadftest(self, index="GLD"):
         self.start_date = "2020-03-10"
@@ -840,7 +867,7 @@ class algo(object):
         print (kelly)
         
         
-    def volatility(self, index = "000001.XSHG"):
+    def volatility(self, index = "^GSPC"):
         if isChinaMkt(index):
             self.df_dict = DailyPrice().loadAll()
         else:
@@ -932,7 +959,7 @@ class algo(object):
         else:
             self.df_dict = USDailyPrice().loadAll()
             
-        self.start_date = "2016-01-01"
+        self.start_date = "2019-01-01"
         self.end_date = TODAY        
         df = self.df_dict[index]["close"].to_frame()   
         df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]    
@@ -942,29 +969,43 @@ class algo(object):
         N_LAGS = 50
         SIGNIFICANCE_LEVEL = 0.05          
 
-        fig, ax = plt.subplots(3, 1, figsize=(12, 10))
+        fig, ax = plt.subplots(5, 1, figsize=(12, 10))
         
-        acf = smt.graphics.plot_acf(df.log_rtn, 
+        price_acf = smt.graphics.plot_acf(df.close, 
                                     lags=N_LAGS, 
                                     alpha=SIGNIFICANCE_LEVEL, ax = ax[0])        
         ax[0].set(title='Autocorrelation Plots',
+                  ylabel='Price')     
+        
+        smt.graphics.plot_pacf(df.close,lags=N_LAGS, 
+                  alpha=SIGNIFICANCE_LEVEL,  ax=ax[1])    
+        ax[1].set(title='Partial Autocorrelation Plots',
+                  ylabel='Price')          
+        
+        acf = smt.graphics.plot_acf(df.log_rtn, 
+                                    lags=N_LAGS, 
+                                    alpha=SIGNIFICANCE_LEVEL, ax = ax[2])        
+        ax[2].set(title='Autocorrelation Plots',
                   ylabel='Log Returns')    
         
         smt.graphics.plot_acf(df.log_rtn ** 2, lags=N_LAGS, 
-                              alpha=SIGNIFICANCE_LEVEL, ax = ax[1])
-        ax[1].set(title='Autocorrelation Plots',
+                              alpha=SIGNIFICANCE_LEVEL, ax = ax[3])
+        ax[3].set(title='Autocorrelation Plots',
                   ylabel='Squared Returns')
         
         smt.graphics.plot_acf(np.abs(df.log_rtn), lags=N_LAGS, 
-                              alpha=SIGNIFICANCE_LEVEL, ax = ax[2])
-        ax[2].set(ylabel='Absolute Returns',
+                              alpha=SIGNIFICANCE_LEVEL, ax = ax[4])
+        ax[4].set(ylabel='Absolute Returns',
                   xlabel='Lag')
         
         # plt.tight_layout()
         # plt.savefig('images/ch1_im14.png')
         plt.show()        
         
-    def correl(self, index1="GLD", index2="SLV"):
+    def correl(self, index1="SPY", index2="^TNX"):
+        self.start_date = "2020-01-01"
+        self.end_date = TODAY
+        
         if isChinaMkt(index1):
             self.df_dict1 = DailyPrice().loadAll()
         else:
@@ -982,8 +1023,7 @@ class algo(object):
         if isChinaMkt(index1) and not isChinaMkt(index2):
             df1 = df1.shift(-1)        
         
-        self.start_date = "2020-01-01"
-        self.end_date = TODAY
+
         df = pd.DataFrame()
         df['log_rtn_x'] = np.log(df1.close/df1.close.shift(1))
         df['log_rtn_y'] = np.log(df2.close/df2.close.shift(1))
@@ -1075,7 +1115,7 @@ class algo(object):
         qf.iplot()
 
 
-    def decompose(self, index="GLD"):
+    def decompose(self, index="WDC"):
         pd.plotting.register_matplotlib_converters()
         WINDOW = 10
         self.start_date = "2016-01-01"
@@ -1087,8 +1127,9 @@ class algo(object):
             self.df_dict = USDailyPrice().loadAll()        
         df = self.df_dict[index]['close'].to_frame()
         df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]   
-        df = df.resample('W').last()
         
+        df = df.resample('W').last()
+        df = df.dropna()
         df[str(WINDOW)+' rolling_mean'] = df.close.rolling(window=WINDOW).mean()
         df[str(WINDOW)+' rolling_std'] = df.close.rolling(window=WINDOW).std()
         df.plot(title=index+' Price')
@@ -1098,10 +1139,12 @@ class algo(object):
         plt.show()        
             
         decomposition_mul = seasonal_decompose(df.close, 
-                                                   model='multiplicative'
+                                                   model='multiplicative',
+                                                   period = 5
                                                    )
         decomposition_add = seasonal_decompose(df.close, 
-                                                   model='additive'
+                                                   model='additive',
+                                                   period = 5
                                                    )        
 
         plt.rcParams.update({'figure.figsize': (10,10)})
@@ -1115,13 +1158,17 @@ class algo(object):
         
         df.reset_index(drop=False, inplace=True)
         df.rename(columns={'index': 'ds', 'close': 'y'}, inplace=True)   
-        train_indices = df.ds.apply(lambda x: x.year).values < 2021
-        df_train = df.loc[train_indices].dropna()
-        df_test = df.loc[~train_indices].reset_index(drop=True)    
+        #train_indices = df.ds.apply(lambda x: x.year).values < 2020
+        #df_train = df.loc[train_indices].dropna()
+        #df_test = df.loc[~train_indices].reset_index(drop=True)    
+        df_train = df.loc[(df.ds < "2020-04-01")].dropna()
+        df_test = df.loc[(df.ds >= "2020-04-01")].reset_index(drop=True)    
+        
+        
         model_prophet = Prophet(seasonality_mode='multiplicative')
         model_prophet.add_seasonality(name='monthly', period=30.5, fourier_order=5)
         model_prophet.fit(df_train)        
-        df_future = model_prophet.make_future_dataframe(periods=200)
+        df_future = model_prophet.make_future_dataframe(periods=365)
         df_pred = model_prophet.predict(df_future)
         model_prophet.plot(df_pred)
         plt.tight_layout()
@@ -1131,4 +1178,28 @@ class algo(object):
         model_prophet.plot_components(df_pred)
         plt.tight_layout()
         #plt.savefig('images/ch3_im4.png')
+        plt.show()        
+        
+        
+        selected_columns = ['ds', 'yhat_lower', 'yhat_upper', 'yhat']
+        
+        df_pred = df_pred.loc[:, selected_columns].reset_index(drop=True)
+        #df_test = df_test.merge(df_pred, on=['ds'], how='left')
+        df_test = df.merge(df_pred, on=['ds'], how='outer')
+        df_test.ds = pd.to_datetime(df_test.ds)
+        df_test.set_index('ds', inplace=True)        
+        fig, ax = plt.subplots(1, 1)
+        
+        ax = sns.lineplot(data=df_test[['y', 'yhat_lower', 
+                                        'yhat_upper', 'yhat']])
+        ax.fill_between(df_test.index,
+                        df_test.yhat_lower,
+                        df_test.yhat_upper,
+                        alpha=0.3)
+        ax.set(title=index+' Price - actual vs. predicted',
+               xlabel='Date',
+               ylabel='Gold Price ($)')
+        
+        plt.tight_layout()
+        #plt.savefig('images/ch3_im5.png')
         plt.show()        

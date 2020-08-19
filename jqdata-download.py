@@ -751,7 +751,7 @@ if __name__ == "__main__":
         "updateValuation": Valuation().updateAll,
         "updateSW1": SW1DailyPrice().updateAll,
         "loadPrice": DailyPrice().loadAll,
-        "adftest": algo().adftest,
+        "adf": algo().adf,
         "hurst": algo().hurst,
         "cadftest": algo().cadftest,
         "percent": algo().percent,
@@ -761,7 +761,7 @@ if __name__ == "__main__":
         "johansen": algo().johansen,
         "index_vs_stocks": algo().index_vs_stocks,
         "longShortStocks": algo().longShortStocks,
-        "autoCorrel": algo().autoCorrel,
+        "autoCorrel": algo().autoCorrel,''
         "momentum_top": algo().momentum_top,
         "kelly": algo().kelly,
         "volatility": algo().volatility,

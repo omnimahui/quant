@@ -15,7 +15,7 @@ from io import BytesIO as Buffer
 from io import (TextIOWrapper, BytesIO)
 import yfinance as yf
 
-ADDITIONAL_SECURITIES = ["^GSPC","^VIX"]
+ADDITIONAL_SECURITIES = ["^GSPC","^VIX","^TNX"]
 
 
 # These methods enable python 2 + 3 compatibility.
@@ -279,3 +279,18 @@ class Valuation(SecurityBase):
 #        if not accumulative_df.empty:
 #            accumulative_df["day"] = pd.to_datetime(accumulative_df["day"])    
 #        return accumulative_df
+
+
+class USCpi(Security):
+    def __init__(self):
+        self.db_name = self.__class__.__name__
+        self.cl_name = "cpi"
+        self.db_conn()    
+        
+    def update(self):
+        import cpi
+        cpi.update()
+        print ("US CPI updated")
+        return 1            
+    
+    
