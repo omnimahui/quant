@@ -123,6 +123,11 @@ class SecurityBase(object):
                         self.__class__.__name__,
                     )
                 )
+                
+                if hasattr(self, "pickle_file"):
+                    pickle_file = self.pickle_file+"_"+ security
+                    if os.path.exists(pickle_file):
+                        os.remove(pickle_file)                
     @JQData_decorate
     def updateAll(self):
         if hasattr(self, "pickle_file") and os.path.exists(self.pickle_file):
@@ -150,6 +155,22 @@ class SecurityBase(object):
 
         return self.df_dict
 
+
+    def load(self, security):
+        pickle_file = self.pickle_file+"_"+security
+        try:
+            fp = open(pickle_file, "rb")
+            self.df = pickle.load(fp)
+        except Exception:
+            self.df = pd.DataFrame(
+                list(self.db[security].find({}, {"_id": 0}).sort("index", 1))
+            )
+            self.df.index = self.df["index"]
+            self.df = self.df.fillna(0)
+            fp = open(pickle_file, "wb")
+            pickle.dump(self.df, fp)
+
+        return self.df
 
     
     def loadAll_to_df(self, column="close",securityType=""):

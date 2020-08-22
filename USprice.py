@@ -15,7 +15,7 @@ from io import BytesIO as Buffer
 from io import (TextIOWrapper, BytesIO)
 import yfinance as yf
 
-ADDITIONAL_SECURITIES = ["^GSPC","^VIX","^TNX"]
+ADDITIONAL_SECURITIES = ["^GSPC","^VIX","^TNX","^IRX"]
 
 
 # These methods enable python 2 + 3 compatibility.

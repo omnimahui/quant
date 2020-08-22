@@ -8,6 +8,7 @@ from finance import *
 from common import *
 from algo import *
 from USprice import *
+from arch_volatility import *
 
 
 
@@ -729,8 +730,8 @@ def test():
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
-    multiprocessing.set_start_method("spawn")
+    #multiprocessing.freeze_support()
+    #multiprocessing.set_start_method("spawn")
 
     FUNCTION_MAP = {
         "updateSecurityAdjustment": SecurityAdj().updateAll,
@@ -771,6 +772,7 @@ if __name__ == "__main__":
         "correlSearch": algo().correlSearch,
         "priceChart": algo().priceChart,
         "decompose": algo().decompose,
+        "arch": arch().arch,
         
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(

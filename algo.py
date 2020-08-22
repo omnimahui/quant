@@ -29,12 +29,13 @@ from plotly.offline import iplot, init_notebook_mode
 import plotly.io as pio
 import plotly
 from fbprophet import Prophet
-import cpi
+
 
 setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 
 
 def price_deflate(df):
+    import cpi
     end_date = df.index[-1]
     df["close_deflated"] = df.apply(lambda x: cpi.inflate(x.close,
                                     x["index"], 
@@ -977,16 +978,18 @@ class algo(object):
         ax[0].set(title='Autocorrelation Plots',
                   ylabel='Price')     
         
-        smt.graphics.plot_pacf(df.close,lags=N_LAGS, 
-                  alpha=SIGNIFICANCE_LEVEL,  ax=ax[1])    
-        ax[1].set(title='Partial Autocorrelation Plots',
-                  ylabel='Price')          
+        
         
         acf = smt.graphics.plot_acf(df.log_rtn, 
                                     lags=N_LAGS, 
-                                    alpha=SIGNIFICANCE_LEVEL, ax = ax[2])        
-        ax[2].set(title='Autocorrelation Plots',
+                                    alpha=SIGNIFICANCE_LEVEL, ax = ax[1])        
+        ax[1].set(title='Autocorrelation Plots',
                   ylabel='Log Returns')    
+
+        smt.graphics.plot_pacf(df.log_rtn,lags=N_LAGS, 
+                  alpha=SIGNIFICANCE_LEVEL,  ax=ax[2])    
+        ax[2].set(title='Partial Autocorrelation Plots',
+                  ylabel='Log Returns')  
         
         smt.graphics.plot_acf(df.log_rtn ** 2, lags=N_LAGS, 
                               alpha=SIGNIFICANCE_LEVEL, ax = ax[3])
