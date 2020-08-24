@@ -1,6 +1,6 @@
 # encoding: UTF-8
 
-from statsmodels.tsa.stattools import adfuller
+
 from hurst import compute_Hc
 import statsmodels.api as sm
 import statsmodels.tsa.stattools as ts
@@ -22,19 +22,26 @@ from scipy.stats.stats import pearsonr
 import scipy.stats as scs
 import seaborn as sns 
 import statsmodels.tsa.api as smt
-from statsmodels.tsa.seasonal import seasonal_decompose
+
 
 import cufflinks as cf
 from plotly.offline import iplot, init_notebook_mode
 import plotly.io as pio
 import plotly
 from fbprophet import Prophet
+import math
 
 
 setattr(plotly.offline, "__PLOTLY_OFFLINE_INITIALIZED", True)
 
 
 def price_deflate(df):
+    #if cpi_adjust:
+    #    df = price_deflate(df)
+    #    df[['close','close_deflated']].plot(title=index+' Price and Deflated')
+    #    plt.show()
+    #    X = df["close_deflated"].dropna().values    
+    
     import cpi
     end_date = df.index[-1]
     df["close_deflated"] = df.apply(lambda x: cpi.inflate(x.close,
@@ -58,38 +65,7 @@ class algo(object):
         self.balanceQ_df = {}
         self.valuation_df = {}
 
-    def adf(self, index="GLD"):
-        self.start_date = "2016-03-10"
-        self.end_date = "2020-07-31"
-        if isChinaMkt(index):
-            self.df_dict = DailyPrice().loadAll()
-            self.security_df = Security().load(securityType="stock")
-        else:
-            self.df_dict = USDailyPrice().loadAll()
-            self.security_df = USSecurity().load()
-            
-        df = self.df_dict[index].loc[
-            (self.df_dict[index].index > self.start_date)
-            & (self.df_dict[index].index <= self.end_date)
-        ]
-        
-        #if df.empty or df["close"].count() < 8:
-        #    continue
-        df = price_deflate(df)
-        df[['close','close_deflated']].plot(title=index+' Price and Deflated')
-        plt.show()
-        X = df["close_deflated"].dropna().values
-        #result = adfuller(X, maxlag=1, regression="c", autolag=None)  #autolag="AIC"
-        result = adfuller(X, regression="c", autolag="AIC")  #
-        if result[0] < result[4]["1%"]:
-            #null hypothesis is series is not stationary
-            print("{0} {1} - {2}".format(index, self.start_date, self.end_date))
-            print("ADF Statistic: %f" % result[0])
-            print("p-value: %f" % result[1])
-            print("Critical Values:")
-            for key, value in result[4].items():
-                print("\t%s: %.3f" % (key, value))
-            self.halflife(X)
+
 
     def cadftest(self, index="GLD"):
         self.start_date = "2020-03-10"
@@ -954,57 +930,7 @@ class algo(object):
         #输出(统计量JB的值,P值)=(0.28220016508625245, 0.86840239542814834)，P值>指定水平0.05,接受原假设，可以认为样本数据在5%的显著水平下服从正态分布
         #输出(统计量JB的值,P值)=(1117.2762482645478, 0.0)，P值<指定水平0.05,拒绝原假设，认为样本数据在5%的显著水平下不服从正态分布
         
-    def acf(self, index ="GLD"):
-        if isChinaMkt(index):
-            self.df_dict = DailyPrice().loadAll()
-        else:
-            self.df_dict = USDailyPrice().loadAll()
-            
-        self.start_date = "2019-01-01"
-        self.end_date = TODAY        
-        df = self.df_dict[index]["close"].to_frame()   
-        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]    
-        df['log_rtn'] = np.log(df.close/df.close.shift(1))
-        df = df[['close', 'log_rtn']].dropna(how = 'any')   
-        
-        N_LAGS = 50
-        SIGNIFICANCE_LEVEL = 0.05          
-
-        fig, ax = plt.subplots(5, 1, figsize=(12, 10))
-        
-        price_acf = smt.graphics.plot_acf(df.close, 
-                                    lags=N_LAGS, 
-                                    alpha=SIGNIFICANCE_LEVEL, ax = ax[0])        
-        ax[0].set(title='Autocorrelation Plots',
-                  ylabel='Price')     
-        
-        
-        
-        acf = smt.graphics.plot_acf(df.log_rtn, 
-                                    lags=N_LAGS, 
-                                    alpha=SIGNIFICANCE_LEVEL, ax = ax[1])        
-        ax[1].set(title='Autocorrelation Plots',
-                  ylabel='Log Returns')    
-
-        smt.graphics.plot_pacf(df.log_rtn,lags=N_LAGS, 
-                  alpha=SIGNIFICANCE_LEVEL,  ax=ax[2])    
-        ax[2].set(title='Partial Autocorrelation Plots',
-                  ylabel='Log Returns')  
-        
-        smt.graphics.plot_acf(df.log_rtn ** 2, lags=N_LAGS, 
-                              alpha=SIGNIFICANCE_LEVEL, ax = ax[3])
-        ax[3].set(title='Autocorrelation Plots',
-                  ylabel='Squared Returns')
-        
-        smt.graphics.plot_acf(np.abs(df.log_rtn), lags=N_LAGS, 
-                              alpha=SIGNIFICANCE_LEVEL, ax = ax[4])
-        ax[4].set(ylabel='Absolute Returns',
-                  xlabel='Lag')
-        
-        # plt.tight_layout()
-        # plt.savefig('images/ch1_im14.png')
-        plt.show()        
-        
+       
     def correl(self, index1="SPY", index2="^TNX"):
         self.start_date = "2020-01-01"
         self.end_date = TODAY
@@ -1118,91 +1044,4 @@ class algo(object):
         qf.iplot()
 
 
-    def decompose(self, index="WDC"):
-        pd.plotting.register_matplotlib_converters()
-        WINDOW = 10
-        self.start_date = "2016-01-01"
-        self.end_date = TODAY
-        
-        if isChinaMkt(index):
-            self.df_dict = DailyPrice().loadAll()
-        else:
-            self.df_dict = USDailyPrice().loadAll()        
-        df = self.df_dict[index]['close'].to_frame()
-        df = df.loc[(df.index > self.start_date) & (df.index <= self.end_date)]   
-        
-        df = df.resample('W').last()
-        df = df.dropna()
-        df[str(WINDOW)+' rolling_mean'] = df.close.rolling(window=WINDOW).mean()
-        df[str(WINDOW)+' rolling_std'] = df.close.rolling(window=WINDOW).std()
-        df.plot(title=index+' Price')
-        
-        plt.tight_layout()
-        #plt.savefig('images/ch3_im1.png')
-        plt.show()        
-            
-        decomposition_mul = seasonal_decompose(df.close, 
-                                                   model='multiplicative',
-                                                   period = 5
-                                                   )
-        decomposition_add = seasonal_decompose(df.close, 
-                                                   model='additive',
-                                                   period = 5
-                                                   )        
-
-        plt.rcParams.update({'figure.figsize': (10,10)})
-        decomposition_mul.plot().suptitle('Multiplicative Decompose', fontsize=22)
-        decomposition_add.plot().suptitle('Additive Decompose', fontsize=22)
-        plt.tight_layout()
-        # plt.savefig('images/ch3_im2.png')
-        plt.show()     
-        
-        
-        
-        df.reset_index(drop=False, inplace=True)
-        df.rename(columns={'index': 'ds', 'close': 'y'}, inplace=True)   
-        #train_indices = df.ds.apply(lambda x: x.year).values < 2020
-        #df_train = df.loc[train_indices].dropna()
-        #df_test = df.loc[~train_indices].reset_index(drop=True)    
-        df_train = df.loc[(df.ds < "2020-04-01")].dropna()
-        df_test = df.loc[(df.ds >= "2020-04-01")].reset_index(drop=True)    
-        
-        
-        model_prophet = Prophet(seasonality_mode='multiplicative')
-        model_prophet.add_seasonality(name='monthly', period=30.5, fourier_order=5)
-        model_prophet.fit(df_train)        
-        df_future = model_prophet.make_future_dataframe(periods=365)
-        df_pred = model_prophet.predict(df_future)
-        model_prophet.plot(df_pred)
-        plt.tight_layout()
-        #plt.savefig('images/ch3_im3.png')
-        plt.show()        
-        
-        model_prophet.plot_components(df_pred)
-        plt.tight_layout()
-        #plt.savefig('images/ch3_im4.png')
-        plt.show()        
-        
-        
-        selected_columns = ['ds', 'yhat_lower', 'yhat_upper', 'yhat']
-        
-        df_pred = df_pred.loc[:, selected_columns].reset_index(drop=True)
-        #df_test = df_test.merge(df_pred, on=['ds'], how='left')
-        df_test = df.merge(df_pred, on=['ds'], how='outer')
-        df_test.ds = pd.to_datetime(df_test.ds)
-        df_test.set_index('ds', inplace=True)        
-        fig, ax = plt.subplots(1, 1)
-        
-        ax = sns.lineplot(data=df_test[['y', 'yhat_lower', 
-                                        'yhat_upper', 'yhat']])
-        ax.fill_between(df_test.index,
-                        df_test.yhat_lower,
-                        df_test.yhat_upper,
-                        alpha=0.3)
-        ax.set(title=index+' Price - actual vs. predicted',
-               xlabel='Date',
-               ylabel='Gold Price ($)')
-        
-        plt.tight_layout()
-        #plt.savefig('images/ch3_im5.png')
-        plt.show()        
+  

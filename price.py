@@ -125,7 +125,7 @@ class SecurityBase(object):
                 )
                 
                 if hasattr(self, "pickle_file"):
-                    pickle_file = self.pickle_file+"_"+ security
+                    pickle_file = self.pickle_file+"_"+ index
                     if os.path.exists(pickle_file):
                         os.remove(pickle_file)                
     @JQData_decorate

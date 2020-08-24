@@ -6,9 +6,10 @@ from industry import *
 from indicators import *
 from finance import *
 from common import *
-from algo import *
+import algo.generic
 from USprice import *
-from arch_volatility import *
+import algo.arch
+import algo.timeseries
 
 
 
@@ -752,27 +753,30 @@ if __name__ == "__main__":
         "updateValuation": Valuation().updateAll,
         "updateSW1": SW1DailyPrice().updateAll,
         "loadPrice": DailyPrice().loadAll,
-        "adf": algo().adf,
-        "hurst": algo().hurst,
-        "cadftest": algo().cadftest,
-        "percent": algo().percent,
-        "ebittevroc": algo().ebittev,
+        "adf": algo.timeseries.stationarity().test,
+        "ses": algo.timeseries.expsmooth().test,
+        "cadftest": algo.generic.algo().cadftest,
+        "hurst": algo.generic.algo().hurst,
+        "percent": algo.generic.algo().percent,
+        "ebittevroc": algo.generic.algo().ebittev,
         "test": IncomeQuarter().loadAll,
-        "kalman": algo().kalman,
-        "johansen": algo().johansen,
-        "index_vs_stocks": algo().index_vs_stocks,
-        "longShortStocks": algo().longShortStocks,
-        "autoCorrel": algo().autoCorrel,''
-        "momentum_top": algo().momentum_top,
-        "kelly": algo().kelly,
-        "volatility": algo().volatility,
-        "pdf": algo().pdf,
-        "acf": algo().acf,
-        "correl": algo().correl,
-        "correlSearch": algo().correlSearch,
-        "priceChart": algo().priceChart,
-        "decompose": algo().decompose,
-        "arch": arch().arch,
+        "kalman": algo.generic.algo().kalman,
+        "johansen": algo.generic.algo().johansen,
+        "index_vs_stocks": algo.generic.algo().index_vs_stocks,
+        "longShortStocks": algo.generic.algo().longShortStocks,
+        "autoCorrel": algo.generic.algo().autoCorrel,''
+        "momentum_top": algo.generic.algo().momentum_top,
+        "kelly": algo.generic.algo().kelly,
+        "volatility": algo.generic.algo().volatility,
+        "pdf": algo.generic.algo().pdf,
+        #"acf": generic.algo().acf,
+        "correl": algo.generic.algo().correl,
+        "correlSearch": algo.generic.algo().correlSearch,
+        "priceChart": algo.generic.algo().priceChart,
+        "decompose": algo.timeseries.timeseries().decompose,
+        "arch": algo.arch.arch().arch,
+        "arima": algo.timeseries.arima().test,
+        
         
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
