@@ -420,23 +420,23 @@ class arima(timeseries):
         #self.auto_arima(df.close)
 
     def arima(self, x):
-        x_train = x.loc[
-            (x.index <= "2020-07-01" )
+        x = x.resample('W').last() 
+        x = x.pct_change().dropna() #x.diff(1).dropna()
+        x_resample = x.loc[
+            (x.index <= "2020-08-18" )
         ]    
         x_test = x.loc[
-            (x.index > "2020-07-01" )
-            & (self.df.index <= TODAY)
-        ]         
-        x_resample = x_train.resample('W') \
-                 .last() 
-        x_test = x_test.resample('W') \
-                 .last()         
+            (x.index > "2020-08-18" )
+            & (x.index <= TODAY)
+        ]        
+        #x_resample = x_resample.resample('W') \
+        #         .last() 
+        #x_test = x_test.resample('W') \
+        #         .last()         
                     
-        x_resample_diff = x_resample.diff(1).dropna()
-        
         fig, ax = plt.subplots(2, sharex=True)
         x_resample.plot(title = "Series", ax=ax[0])
-        x_resample_diff.plot(ax=ax[1], title='First Differences')
+        x_resample.plot(ax=ax[1], title='First Differences')
         
         plt.tight_layout()
         #plt.savefig('images/ch3_im18.png')
@@ -447,8 +447,8 @@ class arima(timeseries):
         alpha=0.05
         h0_type='c'
         
-        adf_results = stationarity().adf(x_resample_diff)
-        kpss_results = stationarity().kpss(x_resample_diff, h0_type=h0_type)
+        adf_results = stationarity().adf(x_resample)
+        kpss_results = stationarity().kpss(x_resample, h0_type=h0_type)
     
         print('ADF test statistic: {:.2f} (p-val: {:.2f})'.format(adf_results['Test Statistic'],
                                                                  adf_results['p-value']))
@@ -456,21 +456,32 @@ class arima(timeseries):
                                                                   kpss_results['p-value']))
     
         fig, ax = plt.subplots(2, figsize=(16, 8))
-        smt.graphics.plot_acf(x_resample_diff, ax=ax[0], lags=n_lags, alpha=alpha)
-        smt.graphics.plot_pacf(x_resample_diff, ax=ax[1], lags=n_lags, alpha=alpha)  
+        smt.graphics.plot_acf(x_resample, ax=ax[0], lags=n_lags, alpha=alpha)
+        smt.graphics.plot_pacf(x_resample, ax=ax[1], lags=n_lags, alpha=alpha)  
         plt.show()  
         
-        arima = ARIMA(x_resample, order=(0, 1, 0)).fit(disp=0)
+        arima = ARIMA(x_resample, order=(1, 0, 0)).fit(disp=0)
         print (arima.summary())
         self.arima_diagnostics(arima.resid, 40)
+        #Check if resident is white noise. if not, there still must be information in the time series.
         self.ljungbox_test(arima.resid)
         plt.tight_layout()
         #plt.savefig('images/ch3_im21.png')
-        plt.show()        
+        plt.show()  
+        predict = pd.DataFrame(arima.forecast(3)[0], index = x_test.index)
+        #print (x_test)
+        #zero = pd.DataFrame(np.zeros(len(x_test.index)), index=x_test.index)
+        plt.figure(figsize=(10,4))
+        plt.plot(x_test,label='realValue')
+        plt.plot(predict,label='predictValue')
+        #plt.plot(zero,label='zero')
+        plt.legend(loc=0)
+        plt.show()
+        
 
-    def ljungbox_test(self, resids):
-        #null hypothesis is autocorrelation is 0
-        ljung_box_results = acorr_ljungbox(resids)
+    def ljungbox_test(self, x):
+        #null hypothesis is white noise
+        ljung_box_results = acorr_ljungbox(x)
         
         fig, ax = plt.subplots(1, figsize=[16, 5])
         sns.scatterplot(x=range(len(ljung_box_results[1])), 

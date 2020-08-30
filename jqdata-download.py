@@ -10,6 +10,8 @@ import algo.generic
 from USprice import *
 import algo.arch
 import algo.timeseries
+import portfolio.reports
+import portfolio.efficientFrontier
 
 
 
@@ -775,7 +777,10 @@ if __name__ == "__main__":
         "priceChart": algo.generic.algo().priceChart,
         "decompose": algo.timeseries.timeseries().decompose,
         "arch": algo.arch.arch().arch,
+        "garch": algo.arch.arch().garch,
         "arima": algo.timeseries.arima().test,
+        "portfolio": portfolio.reports.portfolio().run,
+        "ef": portfolio.efficientFrontier.efficientFrontier().run,
         
         
         "updateIndicatorsD": indicators().update,
