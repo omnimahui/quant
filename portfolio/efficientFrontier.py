@@ -19,7 +19,7 @@ class efficientFrontier(object):
         self.returns_df = pd.DataFrame()
         self.weight_df = pd.DataFrame()
         self.security_list = ["GLD","TLT","SPY"]
-        self.start_date = "2015-01-01"
+        self.start_date = "2020-03-19"
         self.end_date = TODAY        
         
     def run(self):

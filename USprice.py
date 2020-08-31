@@ -102,7 +102,6 @@ class SecurityAdj(SecurityBase):
         df = finance.run_query(q)  
         return df
     
-    @JQData_decorate
     def updateAll(self):
         start_date = datetime.strptime("2010-01-01", DATE_FORMAT)
         if hasattr(self, "pickle_file") and os.path.exists(self.pickle_file):
