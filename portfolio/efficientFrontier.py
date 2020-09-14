@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import warnings
 import seaborn as sns
 import pandas as pd
+import scipy.optimize as sco
 
 import yfinance as yf
 import numpy as np
@@ -14,18 +15,19 @@ from price import DailyPrice, Valuation, Security
 from USprice import *
 from common import *
 
+N_PORTFOLIOS = 10 ** 5
+N_DAYS = 252
+
 class efficientFrontier(object):
     def __init__(self):
         self.returns_df = pd.DataFrame()
         self.weight_df = pd.DataFrame()
         self.security_list = ["GLD","TLT","SPY"]
         self.start_date = "2020-03-19"
-        self.end_date = TODAY        
+        self.end_date = TODAY   
         
-    def run(self):
-        N_PORTFOLIOS = 10 ** 5
-        N_DAYS = 252
-        n_assets = len(self.security_list)
+    def load(self):
+
         prices_df = pd.DataFrame()
         for s in self.security_list:
             if isChinaMkt(s):
@@ -41,6 +43,13 @@ class efficientFrontier(object):
         prices_df = prices_df.dropna(how = 'any')
         prices_df.columns = self.security_list
         returns_df = prices_df.pct_change().dropna()
+        return returns_df
+        
+    def run_montecarlo(self):
+
+        n_assets = len(self.security_list)
+        
+        returns_df = self.load()
         avg_returns = returns_df.mean() * N_DAYS
         cov_mat = returns_df.cov() * N_DAYS   
         print(f'cov: {cov_mat}')
@@ -80,6 +89,122 @@ class efficientFrontier(object):
         portf_rtns_ef = np.delete(portf_rtns_ef, indices_to_skip)
         
         self.draw(portf_results_df, portf_rtns_ef, portf_vol_ef, cov_mat, avg_returns, weights)
+
+    def run_sharpe_optimization(self):
+        def get_portf_rtn(w, avg_rtns):
+            return np.sum(avg_rtns * w)
+        
+        def get_portf_vol(w, avg_rtns, cov_mat):
+            return np.sqrt(np.dot(w.T, np.dot(cov_mat, w)))
+        
+        def neg_sharpe_ratio(w, avg_rtns, cov_mat, rf_rate):
+            #objective function
+            portf_returns = np.sum(avg_rtns * w)
+            portf_volatility = np.sqrt(np.dot(w.T, np.dot(cov_mat, w)))
+            portf_sharpe_ratio = (portf_returns - rf_rate) / portf_volatility
+            return -portf_sharpe_ratio     
+        
+        returns_df = self.load()
+        avg_returns = returns_df.mean() * N_DAYS
+        cov_mat = returns_df.cov() * N_DAYS   
+        n_assets = len(avg_returns)
+        RF_RATE = 0
+        
+        args = (avg_returns, cov_mat, RF_RATE)
+        constraints = ({'type': 'eq', 
+                        'fun': lambda x: np.sum(x) - 1})
+        bounds = tuple((0,1) for asset in range(n_assets))
+        initial_guess = n_assets * [1. / n_assets]
+        
+        max_sharpe_portf = sco.minimize(neg_sharpe_ratio, 
+                                        x0=initial_guess, 
+                                        args=args,
+                                        method='SLSQP', 
+                                        bounds=bounds, 
+                                        constraints=constraints)        
+        
+        max_sharpe_portf_w = max_sharpe_portf['x']
+        max_sharpe_portf = {'Return': get_portf_rtn(max_sharpe_portf_w, 
+                                                    avg_returns),
+                            'Volatility': get_portf_vol(max_sharpe_portf_w, 
+                                                        avg_returns, 
+                                                        cov_mat),
+                            'Sharpe Ratio': -max_sharpe_portf['fun']}
+        print('Maximum Sharpe Ratio portfolio ----')
+        print('Performance')
+        
+        for index, value in max_sharpe_portf.items():
+            print(f'{index}: {100 * value:.2f}% ', end="", flush=True)
+        
+        print('\nWeights')
+        for x, y in zip(self.security_list, max_sharpe_portf_w):
+            print(f'{x}: {100*y:.2f}% ', end="", flush=True)        
+
+    def run_vol_optimization(self):
+        def get_portf_rtn(w, avg_rtns):
+            return np.sum(avg_rtns * w)
+        
+        def get_portf_vol(w, avg_rtns, cov_mat):
+            return np.sqrt(np.dot(w.T, np.dot(cov_mat, w)))        
+        
+        def get_efficient_frontier(avg_rtns, cov_mat, rtns_range):
+            
+            efficient_portfolios = []
+            
+            n_assets = len(avg_returns)
+            args = (avg_returns, cov_mat)
+            bounds = tuple((0,1) for asset in range(n_assets))
+            initial_guess = n_assets * [1. / n_assets, ]
+            
+            for ret in rtns_range:
+                constraints = ({'type': 'eq', 
+                                'fun': lambda x: get_portf_rtn(x, avg_rtns) - ret},
+                               {'type': 'eq', 
+                                'fun': lambda x: np.sum(x) - 1})
+                efficient_portfolio = sco.minimize(get_portf_vol, initial_guess, 
+                                                   args=args, method='SLSQP', 
+                                                   constraints=constraints,
+                                                   bounds=bounds)
+                efficient_portfolios.append(efficient_portfolio)
+            
+            return efficient_portfolios
+        
+        returns_df = self.load()
+        avg_returns = returns_df.mean() * N_DAYS
+        cov_mat = returns_df.cov() * N_DAYS   
+        rtns_range = np.linspace(-0.1, 2, 200)
+        efficient_portfolios = get_efficient_frontier(avg_returns, 
+                                                      cov_mat, 
+                                                      rtns_range)
+        vols_range = [x['fun'] for x in efficient_portfolios]
+        fig, ax = plt.subplots()
+        ax.plot(vols_range, rtns_range, 'b--', linewidth=3)
+        ax.set(xlabel='Volatility', 
+               ylabel='Expected Returns', 
+               title='Efficient Frontier')
+        
+        plt.tight_layout()
+        #plt.savefig('images/ch7_im12.png')
+        plt.show()     
+
+        min_vol_ind = np.argmin(vols_range)
+        min_vol_portf_rtn = rtns_range[min_vol_ind]
+        min_vol_portf_vol = efficient_portfolios[min_vol_ind]['fun']
+        
+        min_vol_portf = {'Return': min_vol_portf_rtn,
+                         'Volatility': min_vol_portf_vol,
+                         'Sharpe Ratio': (min_vol_portf_rtn / 
+                                          min_vol_portf_vol)}
+        
+        print('Minimum Volatility portfolio ----')
+        print('Performance')
+        
+        for index, value in min_vol_portf.items():
+            print(f'{index}: {100 * value:.2f}% ', end="", flush=True)
+        
+        print('\nWeights')
+        for x, y in zip(self.security_list, efficient_portfolios[min_vol_ind]['x']):
+            print(f'{x}: {100*y:.2f}% ', end="", flush=True)        
         
         
     def draw(self, portf_results_df, portf_rtns_ef, portf_vol_ef, cov_mat, avg_returns, weights):

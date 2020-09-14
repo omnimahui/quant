@@ -11,6 +11,9 @@ import pandas as pd
 import _pickle as pickle
 
 
+        
+
+
 class IsST(SecurityBase):
     def __init__(self):
         super(IsST, self).__init__("IsST")
@@ -45,7 +48,6 @@ class MoneyFlow(SecurityBase):
     def query(self, index, start_date, end_date):
         df = get_money_flow(index, start_date, end_date)
         return df
-
 
 class indicators(object):
     def __init__(self, class_name="DailyPrice", db_name="DailyIndicators"):

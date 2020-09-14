@@ -718,6 +718,10 @@ def updateAllUS():
     USSecurity().update()
     USDailyPrice().updateAll()
     
+def updateAllFinance():
+    FundamentalQuarter().updateAll()
+    IncomeQuarter().updateAll()
+    BalanceQuarter().updateAll()
 
 def test():
     q = (
@@ -780,8 +784,9 @@ if __name__ == "__main__":
         "garch": algo.arch.arch().garch,
         "arima": algo.timeseries.arima().test,
         "portfolio": portfolio.reports.portfolio().run,
-        "ef": portfolio.efficientFrontier.efficientFrontier().run,
-        
+        "ef": portfolio.efficientFrontier.efficientFrontier().run_montecarlo,
+        "ef_volopt": portfolio.efficientFrontier.efficientFrontier().run_vol_optimization,
+        "ef_sharpeopt": portfolio.efficientFrontier.efficientFrontier().run_sharpe_optimization,
         
         "updateIndicatorsD": indicators().update,
         "updateIndicatorsW": indicators(
@@ -804,7 +809,8 @@ if __name__ == "__main__":
         "updateAll": updateAll,
         "updateAllUS": updateAllUS,
         "updateIndustryPriceD": IndustryDailyPrice().updateAll,
-        "updateConcept": Concept().updateAll
+        "updateConcept": Concept().updateAll,
+        "updateAllFinance": updateAllFinance
     }
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=FUNCTION_MAP.keys())
