@@ -17,6 +17,7 @@ import yfinance as yf
 
 ADDITIONAL_SECURITIES = ["^GSPC","^VIX","^TNX","^IRX"]
 
+EXCLUDE_LIST = []
 
 # These methods enable python 2 + 3 compatibility.
 def get_zipfile_from_response(response):
@@ -58,7 +59,13 @@ class USSecurity(Security):
                             'currency':'USD',
                             'start_date': pd.to_datetime('1985-01-01'),
                             'end_date': pd.to_datetime(TODAY)}, ignore_index=True)
-            
+        
+        #get exclude list
+        exclude_df = pd.DataFrame(list(self.db["exclude_securities"].find({})))  
+        if not exclude_df.empty:
+            cond = df['index'].isin(exclude_df['index'])
+            df.drop(df[cond].index, inplace = True)
+        
         self.cl.drop()
         self.cl.insert_many(df.to_dict("records"))
         print ("US security list updated")
@@ -68,11 +75,24 @@ class USDailyPrice(SecurityBase):
     def __init__(self, db_name="USDailyPrice"):
         super().__init__(db_name, USSecurity)
 
+    def update_exclude_security(self, index):
+        db = self.db_conn["USSecurity"]     
+        cl = db["exclude_securities"]
+        cl.insert_one({"index":index})
+
     def query(self, index, start_date, end_date):
         df = yf.download(index, 
                                start=start_date, 
                                end=end_date+timedelta(days=1),
                                progress=False)
+        
+        if df.empty:
+            exist = yf.Ticker(index)
+            try:
+                exist.info
+            except:
+                self.update_exclude_security(index)
+            
         df=df.drop(columns=["Close"])
         df.columns = ["open","high","low","close","volume"]
         return df
