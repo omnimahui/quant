@@ -9,6 +9,7 @@ from common import *
 import os
 import pandas as pd
 import _pickle as pickle
+import pandas_ta as ta
 
 
         
@@ -100,6 +101,40 @@ class indicators(object):
         macd = (dif - dea) * 2
         macd.name = "macd"
         return macd
+    
+    def rsi(self, index, window=4):
+        ts = self.df_dict[index].close
+        rsi = ta.rsi(ts, length=window)
+        rsi.name = "rsi_"+str(window)
+        return rsi
+
+    def rsi_streak(self, index, window=2):
+        ts = self.df_dict[index].close
+        p = ((ts-ts.shift(1)).fillna(0) > 0).astype(int)
+        n = ((ts-ts.shift(1)).fillna(0) < 0).astype(int).replace(1,-1)
+        streak = p.add(n)
+        streak=streak.groupby((streak != streak.shift()).cumsum()).cumsum()
+        rsi_streak=ta.rsi(streak, window)
+        return rsi_streak        
+
+    def percentile(self, pct_ts):
+        percentile = pct_ts[pct_ts < pct_ts.iloc[-1]].count()/(pct_ts.count()-1)
+        return percentile
+        
+    def pctRank(self, index, lookback=100):
+        ts = self.df_dict[index].close
+        pct_ts = ts.pct_change()
+        pctRank = pct_ts.rolling(window=lookback+1, center=False).\
+                  apply(self.percentile, raw=False).fillna(0)
+        return pctRank*100
+        
+    
+    def crsi(self, index, window = 100):
+        rsi_3 = self.rsi(index, window=3)
+        rsi_streak = self.rsi_streak(index, window=2)
+        pctRank = self.pctRank(index, window)
+        return (rsi_3+rsi_streak+pctRank)/3
+        
 
     def update(self):
         # For each index
@@ -112,6 +147,10 @@ class indicators(object):
                 sma_21 = self.sma(security, 21)
                 sma_55 = self.sma(security, 55)
                 sma_200 = self.sma(security, 200)
+                rsi_4 = self.rsi(security, 4)
+                rsi_8 = self.rsi(security, 8)
+                rsi_14 = self.rsi(security, 14)
+                crsi = self.crsi(security, 100)
                 atr_20 = self.atr(security, 20)
                 atr_60 = self.atr(security, 60)
                 dif = self.dif(security)
@@ -127,6 +166,10 @@ class indicators(object):
                     dif,
                     dea,
                     macd,
+                    rsi_4,
+                    rsi_8,
+                    rsi_14,
+                    crsi,
                 ]:
                     df = df.merge(series.to_frame(), left_index=True, right_index=True)
 
