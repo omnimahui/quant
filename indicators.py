@@ -10,7 +10,9 @@ import os
 import pandas as pd
 import _pickle as pickle
 import pandas_ta as ta
-
+from sklearn.linear_model import LinearRegression
+import math
+import multiprocessing
 
         
 
@@ -127,14 +129,36 @@ class indicators(object):
         pctRank = pct_ts.rolling(window=lookback+1, center=False).\
                   apply(self.percentile, raw=False).fillna(0)
         return pctRank*100
-        
     
     def crsi(self, index, window = 100):
         rsi_3 = self.rsi(index, window=3)
         rsi_streak = self.rsi_streak(index, window=2)
         pctRank = self.pctRank(index, window)
-        return (rsi_3+rsi_streak+pctRank)/3
-        
+        crsi = (rsi_3+rsi_streak+pctRank)/3
+        crsi.name = "crsi"
+        return crsi
+
+    def momentum(self, index, window = 20):
+        ts = self.df_dict[index].close
+        adj_slope = ts.rolling(window=window, center=False).apply(
+            self.momentumInWindow, raw=False
+        )
+        adj_slope.name = "momentum_" + str(window)
+        adj_slope = adj_slope.reindex(ts.index)
+        return adj_slope
+
+    def momentumInWindow(self, ts):
+        logArray = np.log(ts.values)
+        x = pd.Series(np.arange(logArray.size)).to_numpy().reshape(-1, 1)
+        logArray = logArray.reshape(-1, 1)
+        linear_regressor = LinearRegression()  # create object for the class
+        linear_regressor.fit(x, logArray)  # perform linear regression
+        slope = linear_regressor.coef_
+        r2 = linear_regressor.score(x, logArray)
+        annual_slope = math.pow(np.exp(slope), 250) - 1
+        adj_slope = annual_slope * r2
+        return adj_slope    
+           
 
     def update(self):
         # For each index
@@ -142,44 +166,21 @@ class indicators(object):
         self.df_dict = eval(self.price_class)().loadAll()
         if hasattr(self, "pickle_file") and os.path.exists(self.pickle_file):
             os.remove(self.pickle_file)
+        num_worker = 8#multiprocessing.cpu_count()
+        manager = multiprocessing.Manager()
+        worker_queue = manager.Queue()
         for security in self.df_dict.keys():
-            try:
-                sma_21 = self.sma(security, 21)
-                sma_55 = self.sma(security, 55)
-                sma_200 = self.sma(security, 200)
-                rsi_4 = self.rsi(security, 4)
-                rsi_8 = self.rsi(security, 8)
-                rsi_14 = self.rsi(security, 14)
-                crsi = self.crsi(security, 100)
-                atr_20 = self.atr(security, 20)
-                atr_60 = self.atr(security, 60)
-                dif = self.dif(security)
-                dea = self.dea(dif)
-                macd = self.macd(dif, dea)
-                df = pd.DataFrame(index=self.df_dict[security].index)
-                for series in [
-                    sma_21,
-                    sma_55,
-                    sma_200,
-                    atr_20,
-                    atr_60,
-                    dif,
-                    dea,
-                    macd,
-                    rsi_4,
-                    rsi_8,
-                    rsi_14,
-                    crsi,
-                ]:
-                    df = df.merge(series.to_frame(), left_index=True, right_index=True)
-
-                df["index"] = self.df_dict[security].index
-                # Insert into DB
-                self.db[security].drop()
-                self.db[security].insert_many(df.to_dict("records"))
-
-            except Exception as ex:
-                print("Got exception: {0} {1}".format(security, ex))
+            worker_queue.put(security)
+        pool = multiprocessing.Pool(num_worker)
+        for i in range(num_worker):
+            pool.apply_async(worker, args=(worker_queue, i, self.db_name, self.price_class))
+        # stop workers
+        for i in range(num_worker):
+            worker_queue.put(None)
+    
+        pool.close()
+        pool.join()            
+            
 
     def loadAll(self):
         try:
@@ -197,3 +198,64 @@ class indicators(object):
             fp = open(self.pickle_file, "wb")
             pickle.dump(self.df_dict, fp)
         return self.df_dict
+    
+
+def worker(queue, worker_id, db_name, class_name):
+    instance = indicators(class_name=class_name, db_name=db_name)
+    instance.df_dict = eval(instance.price_class)().loadAll()
+    while True:
+        security = queue.get()
+        if security is None:
+            break            
+        try:
+            sma_21 = instance.sma(security, 21)
+            sma_55 = instance.sma(security, 55)
+            sma_200 = instance.sma(security, 200)
+            rsi_2 = instance.rsi(security, 2)
+            rsi_4 = instance.rsi(security, 4)
+            rsi_8 = instance.rsi(security, 8)
+            rsi_14 = instance.rsi(security, 14)
+            crsi = instance.crsi(security, 100)
+            atr_20 = instance.atr(security, 20)
+            atr_60 = instance.atr(security, 60)
+            atr_100 = instance.atr(security, 100)
+            dif = instance.dif(security)
+            dea = instance.dea(dif)
+            macd = instance.macd(dif, dea)
+            momentum_20 = instance.momentum(security, 20)
+            momentum_60 = instance.momentum(security, 60)
+            momentum_120 = instance.momentum(security, 120)
+            momentum_250 = instance.momentum(security, 250)
+            df = pd.DataFrame(index=instance.df_dict[security].index)
+            for series in [
+                sma_21,
+                sma_55,
+                sma_200,
+                atr_20,
+                atr_60,
+                atr_100,
+                dif,
+                dea,
+                macd,
+                momentum_20,
+                momentum_60,
+                momentum_120,
+                momentum_250,
+                rsi_2,
+                rsi_4,
+                rsi_8,
+                rsi_14,
+                crsi,
+            ]:
+                df = df.merge(series.to_frame(), left_index=True, right_index=True)
+
+            df["index"] = instance.df_dict[security].index
+            # Insert into DB
+            instance.db[security].drop()
+            instance.db[security].insert_many(df.fillna(0).to_dict("records"))
+            print("{0} indicators done in worker {1}".format(security, worker_id))
+
+        except Exception as ex:
+            print("Got exception: {0} {1}".format(security, ex))   
+    queue.task_done()
+    return 0         
