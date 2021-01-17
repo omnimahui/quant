@@ -2,6 +2,7 @@
 
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from price import SecurityBase, DailyPrice, WeeklyPrice, MonthlyPrice
+from USprice import USDailyPrice
 import jqdatasdk as jq
 from jqdatasdk import *
 from datetime import datetime, timedelta
@@ -151,12 +152,15 @@ class indicators(object):
         logArray = np.log(ts.values)
         x = pd.Series(np.arange(logArray.size)).to_numpy().reshape(-1, 1)
         logArray = logArray.reshape(-1, 1)
-        linear_regressor = LinearRegression()  # create object for the class
-        linear_regressor.fit(x, logArray)  # perform linear regression
-        slope = linear_regressor.coef_
-        r2 = linear_regressor.score(x, logArray)
-        annual_slope = math.pow(np.exp(slope), 250) - 1
-        adj_slope = annual_slope * r2
+        try:               
+            linear_regressor = LinearRegression()  # create object for the class
+            linear_regressor.fit(x, logArray)  # perform linear regression
+            slope = linear_regressor.coef_
+            r2 = linear_regressor.score(x, logArray)
+            annual_slope = math.pow(np.exp(slope), 250) - 1
+            adj_slope = annual_slope * r2
+        except Exception as ex:
+            print("Got exception: {0}".format(ex))   
         return adj_slope    
            
 
@@ -166,7 +170,7 @@ class indicators(object):
         self.df_dict = eval(self.price_class)().loadAll()
         if hasattr(self, "pickle_file") and os.path.exists(self.pickle_file):
             os.remove(self.pickle_file)
-        num_worker = 8#multiprocessing.cpu_count()
+        num_worker = 6#multiprocessing.cpu_count()
         manager = multiprocessing.Manager()
         worker_queue = manager.Queue()
         for security in self.df_dict.keys():
@@ -205,6 +209,8 @@ def worker(queue, worker_id, db_name, class_name):
     instance.df_dict = eval(instance.price_class)().loadAll()
     while True:
         security = queue.get()
+        #if security != "150308.XSHE":
+        #    continue
         if security is None:
             break            
         try:

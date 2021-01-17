@@ -28,7 +28,7 @@ class Security(object):
     @JQData_decorate
     def update(self):
         self.cl.drop()
-        securities_df = jq.get_all_securities(types=["stock", "fund", "index", "etf"])
+        securities_df = jq.get_all_securities(types=["stock", "index"])
         securities_df.reset_index(level=0, inplace=True)
         self.cl.insert_many(securities_df.to_dict("records"))
         print ("security list updated")

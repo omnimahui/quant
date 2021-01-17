@@ -717,6 +717,10 @@ def updateAll():
 def updateAllUS():
     USSecurity().update()
     USDailyPrice().updateAll()
+    indicators(class_name="USDailyPrice", db_name="USDailyIndicators").update()
+    
+def updateCrypto():
+    CryptoPrice().updateAll()
     
 def updateAllFinance():
     FundamentalQuarter().updateAll()
@@ -789,6 +793,7 @@ if __name__ == "__main__":
         "ef_sharpeopt": portfolio.efficientFrontier.efficientFrontier().run_sharpe_optimization,
         
         "updateIndicatorsD": indicators().update,
+        "updateIndicatorsD_US": indicators(class_name="USDailyPrice", db_name="USDailyIndicators").update,
         "updateIndicatorsW": indicators(
             class_name="WeeklyPrice", db_name="WeeklyIndicators"
         ).update,
