@@ -152,6 +152,8 @@ class indicators(object):
         logArray = np.log(ts.values)
         x = pd.Series(np.arange(logArray.size)).to_numpy().reshape(-1, 1)
         logArray = logArray.reshape(-1, 1)
+        logArray[np.isnan(logArray)] = 0
+        adj_slope = 0
         try:               
             linear_regressor = LinearRegression()  # create object for the class
             linear_regressor.fit(x, logArray)  # perform linear regression
@@ -192,7 +194,7 @@ class indicators(object):
             self.df_dict = pickle.load(fp)
         except Exception:
             self.df_dict = dict.fromkeys(
-                self.db.list_collection_names(), pd.DataFrame()
+                sorted(self.db.list_collection_names()), pd.DataFrame()
             )
             for security in self.df_dict.keys():
                 self.df_dict[security] = pd.DataFrame(
@@ -209,7 +211,7 @@ def worker(queue, worker_id, db_name, class_name):
     instance.df_dict = eval(instance.price_class)().loadAll()
     while True:
         security = queue.get()
-        #if security != "150308.XSHE":
+        #if security != "^GSPC":
         #    continue
         if security is None:
             break            

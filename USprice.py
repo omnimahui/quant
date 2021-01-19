@@ -94,10 +94,11 @@ class USDailyPrice(SecurityBase):
                 self.update_exclude_security(index)
             
         df=df.drop(columns=["Close"])
+        df.dropna(inplace=True)
         df.columns = ["open","high","low","close","volume"]
         return df
 
-class SecurityAdj(SecurityBase):
+class USSecurityAdj(SecurityBase):
     def __init__(self, db_name="SecurityAdj"):
         super(SecurityAdj, self).__init__(db_name)
         self.dailyprice_db = self.db_conn["DailyPrice"]
@@ -175,7 +176,7 @@ class SecurityAdj(SecurityBase):
         )
 
 
-class WeeklyPrice(DailyPrice):
+class USWeeklyPrice(DailyPrice):
     def __init__(self, db_name="WeeklyPrice"):
         super(WeeklyPrice, self).__init__(db_name)
         self.pickle_file = "weeklyprice.pkl"
@@ -226,7 +227,7 @@ class WeeklyPrice(DailyPrice):
                 )
 
 
-class MonthlyPrice(WeeklyPrice):
+class USMonthlyPrice(WeeklyPrice):
     def __init__(self, db_name="MonthlyPrice"):
         super(MonthlyPrice, self).__init__(db_name)
         self.pickle_file = "monthlyprice.pkl"
@@ -255,7 +256,7 @@ class MonthlyPrice(WeeklyPrice):
         stock_monthly_df["index"] = stock_monthly_df.index
         return stock_monthly_df
 
-class Valuation(SecurityBase):
+class USValuation(SecurityBase):
     def __init__(self):
         super(Valuation, self).__init__("Valuation")
         self.securityType = "stock"

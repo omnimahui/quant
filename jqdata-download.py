@@ -449,8 +449,7 @@ def stockCal():
     # logger.setLevel(multiprocessing.SUBDEBUG)
     worker_queue = manager.Queue()
     stock_price_db = mc["stock_price"]
-    stocks = stock_price_db.list_collection_names()
-    stocks.sort()
+    stocks = sorted(stock_price_db.list_collection_names())
     stock_indicator_db = mc["stock_indicator"]
     stock_indicator_db.indicators.drop()
     for stock in stocks:
@@ -476,8 +475,7 @@ def indexCal():
     # logger.setLevel(multiprocessing.SUBDEBUG)
     worker_queue = manager.Queue()
     index_price_db = mc["index_price"]
-    indexes = index_price_db.list_collection_names()
-    indexes.sort()
+    indexes = sorted(index_price_db.list_collection_names())
     index_indicator_db = mc["index_indicator"]
     index_indicator_db.indicators.drop()
     for index in indexes:
@@ -641,8 +639,7 @@ def stock_value_by_date(stock):
 
 def get_stocks_value_by_date():
     stock_price_db = mc["stock_price"]
-    stocks_code = stock_price_db.list_collection_names()
-    stocks_code.sort()
+    stocks_code = sorted(stock_price_db.list_collection_names())
     # get existing from stock_valuation_db
     # stock_valuation = mc["stock_valuation"]
     # date_list = stock_valuation.list_collection_names()

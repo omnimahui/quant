@@ -12,6 +12,17 @@ from common import *
 from sqlalchemy import and_
 import os 
 
+def progress_bar(count, total):
+    progress = count / total
+    progress = min(progress, 1)
+    if int(progress * 100) == progress_bar.progress:
+        return
+    else:
+        progress_bar.progress = int(progress * 100)
+    progress_msg = "#" * int(progress * 10)
+    print(f"加载进度：{progress_msg} [{progress:.0%}]")          
+
+progress_bar.progress = 0
 
 class Security(object):
     def __init__(self):
@@ -78,7 +89,7 @@ class SecurityBase(object):
         self.db = self.db_conn[self.db_name]
 
     def loadFieldsFromDB(self, fields=["index"]):
-        self.df_dict = dict.fromkeys(self.db.list_collection_names(), pd.DataFrame())
+        self.df_dict = dict.fromkeys(sorted(self.db.list_collection_names()), pd.DataFrame())
         filter = {}
         filter["_id"] = 0
         for field in fields:
@@ -142,14 +153,20 @@ class SecurityBase(object):
             self.df_dict = pickle.load(fp)
         except Exception:
             self.df_dict = dict.fromkeys(
-                self.db.list_collection_names(), pd.DataFrame()
+                sorted(self.db.list_collection_names()), pd.DataFrame()
             )
+            total = len(self.df_dict)
+            count = 0
+            print (f"Loading from DB {self.db_name}")
             for security in self.df_dict.keys():
                 self.df_dict[security] = pd.DataFrame(
                     list(self.db[security].find({}, {"_id": 0}).sort("index", 1))
                 )
                 self.df_dict[security].index = self.df_dict[security]["index"]
+                self.df_dict[security].dropna(inplace=True)
                 self.df_dict[security] = self.df_dict[security].fillna(0)
+                count += 1
+                progress_bar(count, total)
             fp = open(self.pickle_file, "wb")
             pickle.dump(self.df_dict, fp)
 
